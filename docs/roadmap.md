@@ -1,4 +1,4 @@
-# textr roadmap
+# textr-org roadmap
 
 > The long view. Individual milestones get their own living design doc (e.g.
 > [`milestone-2-tui.md`](milestone-2-tui.md)); this file is the map they sit on and the

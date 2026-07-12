@@ -1,4 +1,4 @@
-# textr tutorial — Rust concepts, learned by building Milestone 2
+# textr-org tutorial — Rust concepts, learned by building Milestone 2
 
 Notes on the Rust ideas that showed up while building the M2 editor (the headless `View` and
 `structure` layer in `crates/core`, and the terminal frontend in `crates/tui`). Each section
@@ -304,7 +304,7 @@ let doc = Document::open(&path)
 fn main() -> ExitCode {
     let (doc, stash_path) = match load() {
         Ok(pair) => pair,
-        Err(msg) => { eprintln!("textr: {msg}"); return ExitCode::FAILURE; }
+        Err(msg) => { eprintln!("torg: {msg}"); return ExitCode::FAILURE; }
     };
     …
 }

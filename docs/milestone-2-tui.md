@@ -96,7 +96,7 @@ New files:
 ```
 crates/core/src/view.rs        # headless View: cursor + editing intent
 crates/core/src/structure.rs   # Outline/Heading/TodoState + StructureProvider + OrgProvider
-crates/tui/Cargo.toml          # new crate manifest (binary target `textr`)
+crates/tui/Cargo.toml          # new crate manifest (binary target `torg`)
 crates/tui/src/main.rs         # CLI arg → initial Document → run; only crossterm-adjacent glue
 crates/tui/src/terminal.rs     # terminal driver: raw mode/alt screen, event loop, panic hook
 crates/tui/src/app.rs          # App: owns Document+View+mode+folded; tick/apply; key dispatch

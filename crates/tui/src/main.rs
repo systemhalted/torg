@@ -1,4 +1,4 @@
-//! `textr` — the terminal frontend binary.
+//! `torg` — the terminal frontend binary.
 //!
 //! Thin lifecycle glue: parse the file argument into an initial [`Document`], then hand off to
 //! the terminal driver. All editor behaviour lives in the (tested) [`app`] state tier and in
@@ -21,7 +21,7 @@ fn main() -> ExitCode {
     let (doc, stash_path) = match load() {
         Ok(pair) => pair,
         Err(msg) => {
-            eprintln!("textr: {msg}");
+            eprintln!("torg: {msg}");
             return ExitCode::FAILURE;
         }
     };
@@ -31,7 +31,7 @@ fn main() -> ExitCode {
     let mut term = match terminal::init() {
         Ok(t) => t,
         Err(e) => {
-            eprintln!("textr: failed to start terminal: {e}");
+            eprintln!("torg: failed to start terminal: {e}");
             return ExitCode::FAILURE;
         }
     };
@@ -39,7 +39,7 @@ fn main() -> ExitCode {
     let _ = terminal::restore(); // always restore, even if the loop errored
 
     if let Err(e) = result {
-        eprintln!("textr: {e}");
+        eprintln!("torg: {e}");
         return ExitCode::FAILURE;
     }
     ExitCode::SUCCESS

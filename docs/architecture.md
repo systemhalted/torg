@@ -1,4 +1,4 @@
-# textr architecture
+# textr-org architecture
 
 > The developer map: how the pieces fit and, more importantly, **what is allowed to depend on
 > what**. For *why* textr is built this way and where it is going, see

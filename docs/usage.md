@@ -1,4 +1,4 @@
-# textr usage
+# textr-org usage
 
 A terminal text editor with a first cut of Org-mode–style structure editing. Opens, edits, and
 saves a single buffer, and understands Org `*` headings (folding, navigation, TODO cycling).
@@ -10,10 +10,10 @@ cargo run -p textr-org-tui -- <file>   # open an existing file (or create it on 
 cargo run -p textr-org-tui             # start with an untitled buffer
 ```
 
-Installed (e.g. `cargo install --path crates/tui`), the binary is `textr`:
+Installed (e.g. `cargo install --path crates/tui`), the binary is `torg`:
 
 ```sh
-textr notes.org
+torg notes.org
 ```
 
 - **A path that exists** is opened.
