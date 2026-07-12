@@ -1,85 +1,131 @@
 //! The editor state and all of its transitions — pure, terminal-free, and unit-tested.
 //!
-//! `App` owns the [`Document`] and [`View`] and drives them in response to key presses. It
-//! knows nothing about ratatui or crossterm beyond the `KeyEvent` *data* type, so every
-//! transition below is exercised in-process without a real terminal.
+//! `App` owns the open [`Buffer`]s (each a [`Document`] + [`View`] + presentation state) and
+//! drives the active one in response to key presses. It knows nothing about ratatui or
+//! crossterm beyond the `KeyEvent` *data* type, so every transition below is exercised
+//! in-process without a real terminal.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use textr_org_core::document::Document;
 use textr_org_core::structure::{next_heading, prev_heading, Outline, OrgProvider, StructureProvider};
 use textr_org_core::view::View;
 
 use crate::action::{key_to_action, Action};
+use crate::buffer::Buffer;
 use crate::viewport::viewport_top;
 
-/// What the editor is doing right now. In [`Mode::SaveAs`] the keyboard drives the bottom-line
-/// path prompt instead of the buffer.
+/// What the editor is doing right now. In the prompt modes the keyboard drives the
+/// bottom-line path prompt instead of the buffer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Mode {
     /// Normal editing.
     Edit,
     /// The *Save As* prompt is open; `input` is the path typed so far.
     SaveAs { input: String },
+    /// The *Open* prompt is open; `input` is the path typed so far.
+    OpenFile { input: String },
+    /// The buffer list is open; `selected` is the highlighted entry.
+    BufferList { selected: usize },
+    /// Asking whether to close the active (unsaved) buffer: `y` discards, `n`/Esc cancels.
+    ConfirmClose,
+    /// Asking whether to quit despite unsaved buffers: `y` quits, `n`/Esc cancels.
+    ConfirmQuit,
 }
 
-/// The whole editor: buffer, cursor, mode, fold state, and a derived outline cache.
+/// What a key press did to a bottom-line prompt.
+enum PromptEvent {
+    /// The input changed (or the key was ignored) — stay in the prompt.
+    Pending,
+    /// Esc — leave the prompt without acting.
+    Cancelled,
+    /// Enter — act on the typed text.
+    Submitted(String),
+}
+
+/// Drive a prompt's input with one key press. Ctrl/Alt-modified characters are ignored so
+/// command chords never leak literal characters into a typed path.
+fn prompt_event(input: &mut String, key: KeyEvent) -> PromptEvent {
+    if key.kind != KeyEventKind::Press {
+        return PromptEvent::Pending;
+    }
+    match key.code {
+        KeyCode::Esc => PromptEvent::Cancelled,
+        KeyCode::Enter => PromptEvent::Submitted(input.clone()),
+        KeyCode::Backspace => {
+            input.pop();
+            PromptEvent::Pending
+        }
+        KeyCode::Char(c)
+            if !key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+        {
+            input.push(c);
+            PromptEvent::Pending
+        }
+        _ => PromptEvent::Pending,
+    }
+}
+
+/// The whole editor: the open buffers, which one is active, and the app-global mode/status.
 pub struct App {
-    doc: Document,
-    view: View,
+    /// The open files. Invariant: never empty.
+    buffers: Vec<Buffer>,
+    /// Index of the buffer being edited. Invariant: `< buffers.len()`.
+    active: usize,
     mode: Mode,
-    /// Heading start-lines that are currently collapsed.
-    folded: HashSet<usize>,
-    /// Outline cache, re-derived after every edit so fold ranges stay correct.
-    outline: Outline,
-    /// Top document line of the viewport (updated before each render).
-    scroll_top: usize,
     /// Lines per page, kept in sync with the terminal body height for PageUp/PageDown.
     page: usize,
     /// A transient status-line message (save result, error), cleared on the next key.
     status: String,
-    /// For a buffer opened on a not-yet-existing path: where the first save should go.
-    stash_path: Option<PathBuf>,
     should_quit: bool,
 }
 
 impl App {
-    /// Build an editor over `doc`. `stash_path` is `Some` when the file did not exist yet —
-    /// the first save writes there without prompting.
-    pub fn new(doc: Document, stash_path: Option<PathBuf>) -> Self {
-        let outline = OrgProvider.parse(&doc);
+    /// Build an editor over `buffers`; the first is active. An empty vec gets one untitled
+    /// buffer, keeping the never-empty invariant.
+    pub fn new(mut buffers: Vec<Buffer>) -> Self {
+        if buffers.is_empty() {
+            buffers.push(Buffer::untitled());
+        }
         Self {
-            doc,
-            view: View::new(),
+            buffers,
+            active: 0,
             mode: Mode::Edit,
-            folded: HashSet::new(),
-            outline,
-            scroll_top: 0,
             page: 1,
             status: String::new(),
-            stash_path,
             should_quit: false,
         }
+    }
+
+    // ---- the active buffer -------------------------------------------------
+
+    fn buf(&self) -> &Buffer {
+        &self.buffers[self.active]
+    }
+    fn buf_mut(&mut self) -> &mut Buffer {
+        &mut self.buffers[self.active]
     }
 
     // ---- read-only accessors for the renderer -----------------------------
 
     pub fn document(&self) -> &Document {
-        &self.doc
+        &self.buf().doc
     }
     pub fn view(&self) -> &View {
-        &self.view
+        &self.buf().view
     }
     pub fn mode(&self) -> &Mode {
         &self.mode
     }
     pub fn outline(&self) -> &Outline {
-        &self.outline
+        &self.buf().outline
     }
     pub fn scroll_top(&self) -> usize {
-        self.scroll_top
+        self.buf().scroll_top
     }
     pub fn status(&self) -> &str {
         &self.status
@@ -87,18 +133,33 @@ impl App {
     pub fn should_quit(&self) -> bool {
         self.should_quit
     }
+    /// Index of the active buffer (0-based).
+    pub fn active_index(&self) -> usize {
+        self.active
+    }
+    pub fn buffer_count(&self) -> usize {
+        self.buffers.len()
+    }
+    /// `(display_name, is_dirty)` per open buffer, for the status line and buffer list.
+    pub fn buffer_labels(&self) -> Vec<(String, bool)> {
+        self.buffers
+            .iter()
+            .map(|b| (b.display_name(), b.is_dirty()))
+            .collect()
+    }
 
     /// Whether `line` is a collapsed heading (draw a fold marker on it).
     pub fn is_folded_heading(&self, line: usize) -> bool {
-        self.folded.contains(&line)
+        self.buf().folded.contains(&line)
     }
 
     /// Whether `line` is hidden inside some collapsed heading's subtree (skip it when drawing).
     pub fn is_hidden(&self, line: usize) -> bool {
-        self.outline
+        let b = self.buf();
+        b.outline
             .headings
             .iter()
-            .any(|h| self.folded.contains(&h.line) && line > h.line && line <= h.last_line)
+            .any(|h| b.folded.contains(&h.line) && line > h.line && line <= h.last_line)
     }
 
     // ---- driver seam ------------------------------------------------------
@@ -110,7 +171,8 @@ impl App {
 
     /// Recompute the viewport top so the cursor stays visible in a `body_height`-row body.
     pub fn update_scroll(&mut self, body_height: usize) {
-        self.scroll_top = viewport_top(self.view.cursor_line(), self.scroll_top, body_height);
+        let b = self.buf_mut();
+        b.scroll_top = viewport_top(b.view.cursor_line(), b.scroll_top, body_height);
     }
 
     /// Handle one key press, dispatching by mode.
@@ -122,7 +184,9 @@ impl App {
                     self.apply(action);
                 }
             }
-            Mode::SaveAs { .. } => self.handle_saveas_key(key),
+            Mode::SaveAs { .. } | Mode::OpenFile { .. } => self.handle_prompt_key(key),
+            Mode::BufferList { .. } => self.handle_bufferlist_key(key),
+            Mode::ConfirmClose | Mode::ConfirmQuit => self.handle_confirm_key(key),
         }
     }
 
@@ -130,50 +194,148 @@ impl App {
 
     fn apply(&mut self, action: Action) {
         match action {
-            Action::MoveLeft => self.view.move_left(&self.doc),
-            Action::MoveRight => self.view.move_right(&self.doc),
-            Action::MoveUp => self.view.move_up(&self.doc),
-            Action::MoveDown => self.view.move_down(&self.doc),
-            Action::MoveHome => self.view.move_home(),
-            Action::MoveEnd => self.view.move_end(&self.doc),
-            Action::PageUp => self.view.move_page_up(&self.doc, self.page),
-            Action::PageDown => self.view.move_page_down(&self.doc, self.page),
+            Action::MoveLeft => {
+                let b = self.buf_mut();
+                b.view.move_left(&b.doc);
+            }
+            Action::MoveRight => {
+                let b = self.buf_mut();
+                b.view.move_right(&b.doc);
+            }
+            Action::MoveUp => {
+                let b = self.buf_mut();
+                b.view.move_up(&b.doc);
+            }
+            Action::MoveDown => {
+                let b = self.buf_mut();
+                b.view.move_down(&b.doc);
+            }
+            Action::MoveHome => self.buf_mut().view.move_home(),
+            Action::MoveEnd => {
+                let b = self.buf_mut();
+                b.view.move_end(&b.doc);
+            }
+            Action::PageUp => {
+                let page = self.page;
+                let b = self.buf_mut();
+                b.view.move_page_up(&b.doc, page);
+            }
+            Action::PageDown => {
+                let page = self.page;
+                let b = self.buf_mut();
+                b.view.move_page_down(&b.doc, page);
+            }
             Action::InsertChar(c) => self.edit(|v, d| v.insert_char(d, c)),
             Action::Newline => self.edit(|v, d| v.insert_newline(d)),
             Action::Backspace => self.edit(|v, d| v.backspace(d)),
             Action::Delete => self.edit(|v, d| v.delete(d)),
             Action::Save => self.save(),
-            Action::Quit => self.should_quit = true,
+            Action::Quit => {
+                if self.buffers.iter().any(Buffer::is_dirty) {
+                    self.mode = Mode::ConfirmQuit;
+                } else {
+                    self.should_quit = true;
+                }
+            }
             Action::ToggleFold => self.toggle_fold(),
             Action::NextHeading => {
-                if let Some(line) = next_heading(&self.outline, self.view.cursor_line()) {
-                    self.view.move_to_line(&self.doc, line);
+                let b = self.buf_mut();
+                if let Some(line) = next_heading(&b.outline, b.view.cursor_line()) {
+                    b.view.move_to_line(&b.doc, line);
                 }
             }
             Action::PrevHeading => {
-                if let Some(line) = prev_heading(&self.outline, self.view.cursor_line()) {
-                    self.view.move_to_line(&self.doc, line);
+                let b = self.buf_mut();
+                if let Some(line) = prev_heading(&b.outline, b.view.cursor_line()) {
+                    b.view.move_to_line(&b.doc, line);
                 }
             }
             Action::CycleTodo => {
-                OrgProvider.cycle_todo(&mut self.doc, self.view.cursor_line());
+                let b = self.buf_mut();
+                OrgProvider.cycle_todo(&mut b.doc, b.view.cursor_line());
                 self.reparse();
+            }
+            Action::OpenFile => {
+                self.mode = Mode::OpenFile {
+                    input: String::new(),
+                };
+            }
+            Action::NextBuffer => self.switch_to((self.active + 1) % self.buffers.len()),
+            Action::PrevBuffer => {
+                self.switch_to((self.active + self.buffers.len() - 1) % self.buffers.len())
+            }
+            Action::ListBuffers => {
+                self.mode = Mode::BufferList {
+                    selected: self.active,
+                };
+            }
+            Action::CloseBuffer => {
+                if self.buf().is_dirty() {
+                    self.mode = Mode::ConfirmClose;
+                } else {
+                    self.close_active_buffer();
+                }
             }
         }
     }
 
-    /// Run an editing closure on the view+document, then re-derive the outline.
+    /// Remove the active buffer, keeping the invariants: the list never empties (a fresh
+    /// untitled buffer replaces the last one) and `active` stays in bounds.
+    fn close_active_buffer(&mut self) {
+        self.buffers.remove(self.active);
+        if self.buffers.is_empty() {
+            self.buffers.push(Buffer::untitled());
+        }
+        self.active = self.active.min(self.buffers.len() - 1);
+    }
+
+    /// Answer a y/n confirmation ([`Mode::ConfirmClose`] or [`Mode::ConfirmQuit`]).
+    fn handle_confirm_key(&mut self, key: KeyEvent) {
+        if key.kind != KeyEventKind::Press {
+            return;
+        }
+        match key.code {
+            KeyCode::Char('y') | KeyCode::Char('Y') => {
+                let quitting = self.mode == Mode::ConfirmQuit;
+                self.mode = Mode::Edit;
+                if quitting {
+                    self.should_quit = true;
+                } else {
+                    self.close_active_buffer();
+                }
+            }
+            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => self.mode = Mode::Edit,
+            _ => {}
+        }
+    }
+
+    /// Make `index` the active buffer and announce it on the status line.
+    fn switch_to(&mut self, index: usize) {
+        self.active = index;
+        if self.buffers.len() > 1 {
+            self.status = format!(
+                "{} ({}/{})",
+                self.buf().display_name(),
+                self.active + 1,
+                self.buffers.len()
+            );
+        }
+    }
+
+    /// Run an editing closure on the active view+document, then re-derive the outline.
     fn edit(&mut self, f: impl FnOnce(&mut View, &mut Document)) {
-        f(&mut self.view, &mut self.doc);
+        let b = self.buf_mut();
+        f(&mut b.view, &mut b.doc);
         self.reparse();
     }
 
     /// `Tab`: fold/unfold when the caret sits on a heading, otherwise insert a tab.
     fn toggle_fold(&mut self) {
-        let line = self.view.cursor_line();
-        if self.outline.headings.iter().any(|h| h.line == line) {
-            if !self.folded.remove(&line) {
-                self.folded.insert(line);
+        let b = self.buf_mut();
+        let line = b.view.cursor_line();
+        if b.outline.headings.iter().any(|h| h.line == line) {
+            if !b.folded.remove(&line) {
+                b.folded.insert(line);
             }
         } else {
             self.edit(|v, d| v.insert_char(d, '\t'));
@@ -182,21 +344,21 @@ impl App {
 
     /// Re-parse the outline after an edit and drop folds whose heading line no longer exists.
     fn reparse(&mut self) {
-        self.outline = OrgProvider.parse(&self.doc);
-        let heading_lines: HashSet<usize> =
-            self.outline.headings.iter().map(|h| h.line).collect();
-        self.folded.retain(|line| heading_lines.contains(line));
+        let b = self.buf_mut();
+        b.outline = OrgProvider.parse(&b.doc);
+        let heading_lines: HashSet<usize> = b.outline.headings.iter().map(|h| h.line).collect();
+        b.folded.retain(|line| heading_lines.contains(line));
     }
 
     // ---- saving -----------------------------------------------------------
 
     fn save(&mut self) {
-        if self.doc.path().is_some() {
-            match self.doc.save() {
+        if self.buf().doc.path().is_some() {
+            match self.buf_mut().doc.save() {
                 Ok(()) => self.status = "Saved".into(),
                 Err(e) => self.status = format!("Save failed: {e}"),
             }
-        } else if let Some(path) = self.stash_path.clone() {
+        } else if let Some(path) = self.buf().stash_path.clone() {
             self.save_as(&path);
         } else {
             self.mode = Mode::SaveAs {
@@ -206,44 +368,92 @@ impl App {
     }
 
     fn save_as(&mut self, path: &Path) {
-        match self.doc.save_as(path) {
+        match self.buf_mut().doc.save_as(path) {
             Ok(()) => {
                 self.status = format!("Saved {}", path.display());
-                self.stash_path = None;
+                self.buf_mut().stash_path = None;
             }
             Err(e) => self.status = format!("Save failed: {e}"),
         }
     }
 
-    // ---- SaveAs-mode prompt -----------------------------------------------
+    // ---- the bottom-line prompts (Save As / Open) --------------------------
 
-    fn handle_saveas_key(&mut self, key: KeyEvent) {
+    fn handle_prompt_key(&mut self, key: KeyEvent) {
+        let is_save = matches!(self.mode, Mode::SaveAs { .. });
+        let event = match &mut self.mode {
+            Mode::SaveAs { input } | Mode::OpenFile { input } => prompt_event(input, key),
+            _ => return,
+        };
+        match event {
+            PromptEvent::Pending => {}
+            PromptEvent::Cancelled => self.mode = Mode::Edit,
+            PromptEvent::Submitted(text) => {
+                self.mode = Mode::Edit;
+                let path = PathBuf::from(text);
+                if path.as_os_str().is_empty() {
+                    return;
+                }
+                if is_save {
+                    self.save_as(&path);
+                } else {
+                    self.open_path(path);
+                }
+            }
+        }
+    }
+
+    // ---- the buffer-list picker --------------------------------------------
+
+    fn handle_bufferlist_key(&mut self, key: KeyEvent) {
         if key.kind != KeyEventKind::Press {
             return;
         }
+        let Mode::BufferList { selected } = &mut self.mode else {
+            return;
+        };
         match key.code {
             KeyCode::Esc => self.mode = Mode::Edit,
+            KeyCode::Up => *selected = selected.saturating_sub(1),
+            KeyCode::Down => *selected = (*selected + 1).min(self.buffers.len() - 1),
             KeyCode::Enter => {
-                if let Mode::SaveAs { input } = &self.mode {
-                    let path = PathBuf::from(input.clone());
+                let index = *selected;
+                self.mode = Mode::Edit;
+                self.switch_to(index);
+            }
+            // 1-9 jump straight to that buffer (arrows cover a longer list).
+            KeyCode::Char(c @ '1'..='9') => {
+                let index = c as usize - '1' as usize;
+                if index < self.buffers.len() {
                     self.mode = Mode::Edit;
-                    if !path.as_os_str().is_empty() {
-                        self.save_as(&path);
-                    }
-                }
-            }
-            KeyCode::Backspace => {
-                if let Mode::SaveAs { input } = &mut self.mode {
-                    input.pop();
-                }
-            }
-            KeyCode::Char(c) => {
-                if let Mode::SaveAs { input } = &mut self.mode {
-                    input.push(c);
+                    self.switch_to(index);
                 }
             }
             _ => {}
         }
+    }
+
+    /// Open `path`: switch to its buffer if it is already open (by document path *or* stashed
+    /// first-save path), else load it from disk, else start an empty buffer that will first-save
+    /// there — the same semantics as a CLI argument.
+    fn open_path(&mut self, path: PathBuf) {
+        if let Some(index) = self.buffers.iter().position(|b| b.matches_path(&path)) {
+            self.switch_to(index);
+            return;
+        }
+        let buffer = if path.exists() {
+            match Document::open(&path) {
+                Ok(doc) => Buffer::new(doc, None),
+                Err(e) => {
+                    self.status = format!("cannot open {}: {e}", path.display());
+                    return;
+                }
+            }
+        } else {
+            Buffer::new(Document::new(), Some(path))
+        };
+        self.buffers.push(buffer);
+        self.switch_to(self.buffers.len() - 1);
     }
 }
 
@@ -265,6 +475,11 @@ mod tests {
         }
     }
 
+    /// An app over one buffer — the pre-multi-buffer constructor shape, kept for the tests.
+    fn single(doc: Document, stash_path: Option<PathBuf>) -> App {
+        App::new(vec![Buffer::new(doc, stash_path)])
+    }
+
     fn temp_path(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!("textr_app_{}_{}.org", name, std::process::id()))
     }
@@ -273,7 +488,7 @@ mod tests {
     fn ctrl_s_with_a_path_saves_and_clears_modified() {
         let path = temp_path("save");
         std::fs::write(&path, "* a\n").unwrap();
-        let mut app = App::new(Document::open(&path).unwrap(), None);
+        let mut app = single(Document::open(&path).unwrap(), None);
         typ(&mut app, "x"); // modify
         assert!(app.document().is_modified());
 
@@ -286,7 +501,7 @@ mod tests {
 
     #[test]
     fn ctrl_s_without_a_path_opens_the_saveas_prompt() {
-        let mut app = App::new(Document::from_text("hello"), None);
+        let mut app = single(Document::from_text("hello"), None);
         ctrl(&mut app, 's');
         assert!(matches!(app.mode(), Mode::SaveAs { .. }));
     }
@@ -295,7 +510,7 @@ mod tests {
     fn saveas_prompt_types_writes_on_enter_and_returns_to_edit() {
         let path = temp_path("saveas");
         let _ = std::fs::remove_file(&path);
-        let mut app = App::new(Document::from_text("brand new"), None);
+        let mut app = single(Document::from_text("brand new"), None);
 
         ctrl(&mut app, 's'); // open prompt
         typ(&mut app, path.to_str().unwrap());
@@ -311,7 +526,7 @@ mod tests {
 
     #[test]
     fn saveas_esc_cancels_and_leaves_the_buffer_unsaved() {
-        let mut app = App::new(Document::from_text("data"), None);
+        let mut app = single(Document::from_text("data"), None);
         typ(&mut app, "!"); // now modified
         ctrl(&mut app, 's'); // prompt
         press(&mut app, KeyCode::Esc);
@@ -323,7 +538,7 @@ mod tests {
     fn missing_file_buffer_saves_to_the_stashed_path_without_prompting() {
         let path = temp_path("stash");
         let _ = std::fs::remove_file(&path);
-        let mut app = App::new(Document::new(), Some(path.clone()));
+        let mut app = single(Document::new(), Some(path.clone()));
         typ(&mut app, "* hi\n");
 
         ctrl(&mut app, 's'); // should save_as(stash), NOT open a prompt
@@ -335,7 +550,7 @@ mod tests {
 
     #[test]
     fn tab_on_a_heading_toggles_a_fold_and_hides_its_subtree() {
-        let mut app = App::new(Document::from_text("* A\nbody\n* B\n"), None);
+        let mut app = single(Document::from_text("* A\nbody\n* B\n"), None);
         // caret at (0,0), on heading A
         press(&mut app, KeyCode::Tab);
         assert!(app.is_folded_heading(0));
@@ -348,14 +563,14 @@ mod tests {
 
     #[test]
     fn tab_off_a_heading_inserts_a_tab() {
-        let mut app = App::new(Document::from_text("plain\n"), None);
+        let mut app = single(Document::from_text("plain\n"), None);
         press(&mut app, KeyCode::Tab);
         assert_eq!(app.document().text(), "\tplain\n");
     }
 
     #[test]
     fn ctrl_n_and_ctrl_p_jump_between_headings() {
-        let mut app = App::new(Document::from_text("* A\nx\n* B\ny\n* C\n"), None);
+        let mut app = single(Document::from_text("* A\nx\n* B\ny\n* C\n"), None);
         ctrl(&mut app, 'n'); // A → B (line 2)
         assert_eq!(app.view().cursor_line(), 2);
         ctrl(&mut app, 'n'); // B → C (line 4)
@@ -366,7 +581,7 @@ mod tests {
 
     #[test]
     fn ctrl_t_cycles_the_heading_todo_keyword() {
-        let mut app = App::new(Document::from_text("* task\n"), None);
+        let mut app = single(Document::from_text("* task\n"), None);
         ctrl(&mut app, 't');
         assert_eq!(app.document().text(), "* TODO task\n");
         ctrl(&mut app, 't');
@@ -375,10 +590,280 @@ mod tests {
 
     #[test]
     fn editing_reparses_so_a_new_heading_is_recognized() {
-        let mut app = App::new(Document::from_text("plain\n"), None);
+        let mut app = single(Document::from_text("plain\n"), None);
         assert!(app.outline().headings.is_empty());
         press(&mut app, KeyCode::Home);
         typ(&mut app, "* "); // turn the line into a heading
         assert_eq!(app.outline().headings.len(), 1);
+    }
+
+    #[test]
+    fn an_empty_buffer_list_gets_one_untitled_buffer() {
+        let app = App::new(Vec::new());
+        assert_eq!(app.buffer_count(), 1);
+        assert_eq!(app.buffer_labels()[0], ("[No Name]".to_string(), false));
+    }
+
+    /// An app over three in-memory buffers with distinguishable text.
+    fn three_buffers() -> App {
+        App::new(vec![
+            Buffer::new(Document::from_text("first\n"), None),
+            Buffer::new(Document::from_text("second\n"), None),
+            Buffer::new(Document::from_text("third\n"), None),
+        ])
+    }
+    fn alt(app: &mut App, c: char) {
+        app.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::ALT));
+    }
+
+    #[test]
+    fn alt_n_and_alt_p_cycle_through_buffers_and_wrap() {
+        let mut app = three_buffers();
+        assert_eq!(app.active_index(), 0);
+        alt(&mut app, 'n');
+        assert_eq!(app.active_index(), 1);
+        assert_eq!(app.document().text(), "second\n");
+        alt(&mut app, 'n');
+        alt(&mut app, 'n'); // wraps 2 → 0
+        assert_eq!(app.active_index(), 0);
+        alt(&mut app, 'p'); // wraps 0 → 2
+        assert_eq!(app.active_index(), 2);
+        assert_eq!(app.document().text(), "third\n");
+    }
+
+    #[test]
+    fn ctrl_o_prompt_opens_an_existing_file_and_activates_it() {
+        let path = temp_path("open");
+        std::fs::write(&path, "* opened\n").unwrap();
+        let mut app = single(Document::from_text("home\n"), None);
+
+        ctrl(&mut app, 'o');
+        assert!(matches!(app.mode(), Mode::OpenFile { .. }));
+        typ(&mut app, path.to_str().unwrap());
+        press(&mut app, KeyCode::Enter);
+
+        assert_eq!(app.mode(), &Mode::Edit);
+        assert_eq!(app.buffer_count(), 2);
+        assert_eq!(app.active_index(), 1);
+        assert_eq!(app.document().text(), "* opened\n");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn opening_an_already_open_path_switches_instead_of_duplicating() {
+        let path = temp_path("reopen");
+        std::fs::write(&path, "again\n").unwrap();
+        let mut app = App::new(vec![
+            Buffer::new(Document::open(&path).unwrap(), None),
+            Buffer::new(Document::from_text("other\n"), None),
+        ]);
+        alt(&mut app, 'n'); // active = 1
+
+        ctrl(&mut app, 'o');
+        typ(&mut app, path.to_str().unwrap());
+        press(&mut app, KeyCode::Enter);
+
+        assert_eq!(app.buffer_count(), 2); // no duplicate
+        assert_eq!(app.active_index(), 0); // switched back
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn opening_the_same_missing_path_twice_reuses_the_stash_buffer() {
+        let path = temp_path("missing_twice");
+        let _ = std::fs::remove_file(&path);
+        let mut app = single(Document::from_text("home\n"), None);
+
+        for _ in 0..2 {
+            ctrl(&mut app, 'o');
+            typ(&mut app, path.to_str().unwrap());
+            press(&mut app, KeyCode::Enter);
+        }
+
+        assert_eq!(app.buffer_count(), 2); // home + ONE stash buffer
+        assert_eq!(app.active_index(), 1);
+    }
+
+    #[test]
+    fn a_buffer_opened_on_a_missing_path_saves_there() {
+        let path = temp_path("open_stash");
+        let _ = std::fs::remove_file(&path);
+        let mut app = single(Document::from_text("home\n"), None);
+
+        ctrl(&mut app, 'o');
+        typ(&mut app, path.to_str().unwrap());
+        press(&mut app, KeyCode::Enter);
+        typ(&mut app, "fresh");
+        ctrl(&mut app, 's'); // saves to the stashed path, no prompt
+
+        assert_eq!(app.mode(), &Mode::Edit);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "fresh");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn open_prompt_esc_cancels_without_a_new_buffer() {
+        let mut app = single(Document::from_text("home\n"), None);
+        ctrl(&mut app, 'o');
+        typ(&mut app, "whatever.org");
+        press(&mut app, KeyCode::Esc);
+        assert_eq!(app.mode(), &Mode::Edit);
+        assert_eq!(app.buffer_count(), 1);
+    }
+
+    #[test]
+    fn ctrl_chords_in_a_prompt_are_not_inserted() {
+        let mut app = single(Document::from_text("hello"), None);
+        ctrl(&mut app, 's'); // untitled → SaveAs prompt
+        ctrl(&mut app, 'w'); // must NOT type a literal 'w' into the path
+        assert_eq!(app.mode(), &Mode::SaveAs { input: String::new() });
+    }
+
+    #[test]
+    fn buffer_list_arrows_and_enter_switch() {
+        let mut app = three_buffers();
+        ctrl(&mut app, 'b');
+        assert_eq!(app.mode(), &Mode::BufferList { selected: 0 });
+        press(&mut app, KeyCode::Down);
+        press(&mut app, KeyCode::Down);
+        press(&mut app, KeyCode::Down); // clamps at the last entry
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(app.mode(), &Mode::Edit);
+        assert_eq!(app.active_index(), 2);
+    }
+
+    #[test]
+    fn buffer_list_esc_cancels_without_switching() {
+        let mut app = three_buffers();
+        ctrl(&mut app, 'b');
+        press(&mut app, KeyCode::Down);
+        press(&mut app, KeyCode::Esc);
+        assert_eq!(app.mode(), &Mode::Edit);
+        assert_eq!(app.active_index(), 0);
+    }
+
+    #[test]
+    fn buffer_list_digit_jumps_immediately() {
+        let mut app = three_buffers();
+        ctrl(&mut app, 'b');
+        press(&mut app, KeyCode::Char('2'));
+        assert_eq!(app.mode(), &Mode::Edit);
+        assert_eq!(app.active_index(), 1);
+    }
+
+    #[test]
+    fn buffer_list_ignores_a_digit_beyond_the_open_buffers() {
+        let mut app = three_buffers();
+        ctrl(&mut app, 'b');
+        press(&mut app, KeyCode::Char('9'));
+        assert_eq!(app.mode(), &Mode::BufferList { selected: 0 });
+        assert_eq!(app.active_index(), 0);
+    }
+
+    #[test]
+    fn closing_a_clean_buffer_clamps_the_active_index() {
+        let mut app = three_buffers();
+        alt(&mut app, 'p'); // active = 2 (last)
+        ctrl(&mut app, 'w');
+        assert_eq!(app.buffer_count(), 2);
+        assert_eq!(app.active_index(), 1); // stepped back, not out of bounds
+        assert_eq!(app.document().text(), "second\n");
+    }
+
+    #[test]
+    fn closing_a_middle_buffer_lands_on_the_next_one() {
+        let mut app = three_buffers();
+        alt(&mut app, 'n'); // active = 1
+        ctrl(&mut app, 'w');
+        assert_eq!(app.buffer_count(), 2);
+        assert_eq!(app.active_index(), 1);
+        assert_eq!(app.document().text(), "third\n");
+    }
+
+    #[test]
+    fn closing_a_dirty_buffer_asks_and_y_discards() {
+        let mut app = three_buffers();
+        typ(&mut app, "x"); // dirty
+        ctrl(&mut app, 'w');
+        assert_eq!(app.mode(), &Mode::ConfirmClose);
+        assert_eq!(app.buffer_count(), 3); // nothing closed yet
+        press(&mut app, KeyCode::Char('y'));
+        assert_eq!(app.mode(), &Mode::Edit);
+        assert_eq!(app.buffer_count(), 2);
+        assert_eq!(app.document().text(), "second\n");
+    }
+
+    #[test]
+    fn close_confirmation_n_and_esc_cancel() {
+        let mut app = three_buffers();
+        typ(&mut app, "x"); // dirty
+        for code in [KeyCode::Char('n'), KeyCode::Esc] {
+            ctrl(&mut app, 'w');
+            assert_eq!(app.mode(), &Mode::ConfirmClose);
+            press(&mut app, code);
+            assert_eq!(app.mode(), &Mode::Edit);
+            assert_eq!(app.buffer_count(), 3);
+        }
+    }
+
+    #[test]
+    fn closing_the_last_buffer_leaves_a_fresh_untitled_one() {
+        let mut app = single(Document::from_text("only\n"), None);
+        ctrl(&mut app, 'w');
+        assert!(!app.should_quit());
+        assert_eq!(app.buffer_count(), 1);
+        assert_eq!(app.document().text(), "");
+        assert_eq!(app.buffer_labels()[0].0, "[No Name]");
+    }
+
+    #[test]
+    fn ctrl_q_quits_immediately_when_all_buffers_are_clean() {
+        let mut app = three_buffers();
+        ctrl(&mut app, 'q');
+        assert!(app.should_quit());
+    }
+
+    #[test]
+    fn ctrl_q_with_dirty_buffers_asks_and_y_quits() {
+        let mut app = three_buffers();
+        typ(&mut app, "x"); // one dirty buffer
+        ctrl(&mut app, 'q');
+        assert_eq!(app.mode(), &Mode::ConfirmQuit);
+        assert!(!app.should_quit());
+        press(&mut app, KeyCode::Char('y'));
+        assert!(app.should_quit());
+    }
+
+    #[test]
+    fn quit_confirmation_n_and_esc_cancel() {
+        let mut app = three_buffers();
+        typ(&mut app, "x");
+        for code in [KeyCode::Char('n'), KeyCode::Esc] {
+            ctrl(&mut app, 'q');
+            press(&mut app, code);
+            assert_eq!(app.mode(), &Mode::Edit);
+            assert!(!app.should_quit());
+        }
+    }
+
+    #[test]
+    fn per_buffer_cursor_and_fold_state_survive_switching() {
+        let mut app = App::new(vec![
+            Buffer::new(Document::from_text("* A\nbody\n"), None),
+            Buffer::new(Document::from_text("plain\n"), None),
+        ]);
+        press(&mut app, KeyCode::Tab); // fold heading A
+        press(&mut app, KeyCode::Down); // cursor off line 0... (hidden line, but view allows)
+        let line_before = app.view().cursor_line();
+        assert!(app.is_folded_heading(0));
+
+        alt(&mut app, 'n'); // away...
+        assert!(!app.is_folded_heading(0)); // buffer 2 has no folds
+        typ(&mut app, "x"); // edit buffer 2 independently
+        alt(&mut app, 'p'); // ...and back
+
+        assert!(app.is_folded_heading(0)); // fold intact
+        assert_eq!(app.view().cursor_line(), line_before); // cursor intact
+        assert_eq!(app.document().text(), "* A\nbody\n"); // content untouched
     }
 }

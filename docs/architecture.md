@@ -37,7 +37,8 @@ place, so a future GUI reuses the state and render logic without inheriting the 
         │  │ ui.rs  (ratatui Frame render; no crossterm)        │  │  UI
         │  └──────────────────────────┬────────────────────────┘  │
         │  ┌──────────────────────────▼────────────────────────┐  │
-        │  │ app.rs · action.rs · viewport.rs (pure, tested)    │  │  state
+        │  │ app.rs · buffer.rs · action.rs · viewport.rs       │  │  state
+        │  │ (pure, tested)                                     │  │
         │  └──────────────────────────┬────────────────────────┘  │
         └─────────────────────────────┼───────────────────────────┘
                          depends on ▼ (never the reverse)
@@ -53,7 +54,7 @@ place, so a future GUI reuses the state and render logic without inheriting the 
 
 | Tier | Files | Knows about | Tested? |
 |------|-------|-------------|---------|
-| **State** | `app.rs`, `action.rs`, `viewport.rs` *(M2)* | neither ratatui nor crossterm | yes — pure unit tests |
+| **State** | `app.rs`, `buffer.rs`, `action.rs`, `viewport.rs` *(M2)* | neither ratatui nor crossterm | yes — pure unit tests |
 | **UI / render** | `ui.rs` *(M2)* | ratatui `Frame` only; no I/O, no `event::read` | via manual checklist |
 | **Terminal driver** | `terminal.rs`, `main.rs` *(M2)* | crossterm: raw mode, alt screen, event loop, panic hook | no — the single untested surface |
 
@@ -120,7 +121,11 @@ pub struct OrgProvider; // recognizes ^(\*+)\s+(?:(TODO|DONE)\s+)?(rest)$
 ## Where folding lives — and why not in core
 
 Folding state (which headings are collapsed) is **presentation state**, like scroll position,
-so it lives in the TUI (`App.folded: HashSet<usize>` of heading start lines), **not** in core.
+so it lives in the TUI (`Buffer.folded: HashSet<usize>` of heading start lines), **not** in
+core. The same reasoning places the whole multi-file machinery in the TUI state tier: a
+`Buffer` (`buffer.rs`) groups one `Document` with its `View`, folds, outline cache, and scroll
+position, and the `App` holds a `Vec<Buffer>` plus the active index — core stays a
+single-`Document` model with no notion of which files an editor happens to have open.
 The *outline it folds against* is derived from the buffer by the (headless) structure layer and
 re-derived after edits. Same reasoning as scroll: `viewport_top` is a pure TUI function because
 it depends on terminal height, which core must never know about. The rule holds — anything that

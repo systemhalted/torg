@@ -72,6 +72,9 @@ timestamps parsed as data rather than plain text.
 ### M5 — Agenda
 Multi-buffer/multi-file support and a date model, so timestamped and TODO items across files
 collect into a single agenda view — the first capability that reaches beyond one buffer.
+*(The buffer machinery itself landed early, during M2: the TUI holds a `Vec<Buffer>` with
+open/switch/close commands, so M5 starts from working multi-file editing and adds the
+collection/date layer.)*
 
 ### M6 — Babel
 Executable source blocks with captured results, run in a sandbox. This is the first milestone

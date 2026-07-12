@@ -31,6 +31,12 @@ pub enum Action {
     NextHeading,
     PrevHeading,
     CycleTodo,
+    // buffers
+    OpenFile,
+    NextBuffer,
+    PrevBuffer,
+    ListBuffers,
+    CloseBuffer,
 }
 
 /// Map a key press to an [`Action`], or `None` if the key is unbound.
@@ -43,6 +49,7 @@ pub fn key_to_action(key: KeyEvent) -> Option<Action> {
         return None;
     }
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    let alt = key.modifiers.contains(KeyModifiers::ALT);
     match key.code {
         KeyCode::Left => Some(Action::MoveLeft),
         KeyCode::Right => Some(Action::MoveRight),
@@ -63,6 +70,15 @@ pub fn key_to_action(key: KeyEvent) -> Option<Action> {
             't' => Some(Action::CycleTodo),
             'n' => Some(Action::NextHeading),
             'p' => Some(Action::PrevHeading),
+            'o' => Some(Action::OpenFile),
+            'b' => Some(Action::ListBuffers),
+            'w' => Some(Action::CloseBuffer),
+            _ => None,
+        },
+        // Alt chords: buffer commands (echoing Ctrl+N/P's heading navigation).
+        KeyCode::Char(c) if alt => match c {
+            'n' => Some(Action::NextBuffer),
+            'p' => Some(Action::PrevBuffer),
             _ => None,
         },
         // Any other printable char (incl. Shift for capitals) is inserted.
@@ -80,6 +96,9 @@ mod tests {
     }
     fn ctrl(c: char) -> KeyEvent {
         KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL)
+    }
+    fn alt(c: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(c), KeyModifiers::ALT)
     }
 
     #[test]
@@ -118,6 +137,32 @@ mod tests {
     #[test]
     fn unbound_ctrl_chord_is_none() {
         assert_eq!(key_to_action(ctrl('a')), None);
+    }
+
+    #[test]
+    fn alt_n_and_alt_p_cycle_buffers() {
+        assert_eq!(key_to_action(alt('n')), Some(Action::NextBuffer));
+        assert_eq!(key_to_action(alt('p')), Some(Action::PrevBuffer));
+    }
+
+    #[test]
+    fn ctrl_o_opens_a_file() {
+        assert_eq!(key_to_action(ctrl('o')), Some(Action::OpenFile));
+    }
+
+    #[test]
+    fn ctrl_b_lists_buffers() {
+        assert_eq!(key_to_action(ctrl('b')), Some(Action::ListBuffers));
+    }
+
+    #[test]
+    fn ctrl_w_closes_the_buffer() {
+        assert_eq!(key_to_action(ctrl('w')), Some(Action::CloseBuffer));
+    }
+
+    #[test]
+    fn an_alt_modified_char_is_not_inserted() {
+        assert_eq!(key_to_action(alt('x')), None);
     }
 
     #[test]

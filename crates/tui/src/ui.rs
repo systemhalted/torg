@@ -17,9 +17,35 @@ pub fn render(frame: &mut Frame, app: &App) {
     let body = Rect::new(area.x, area.y, area.width, area.height.saturating_sub(1));
     let status = Rect::new(area.x, area.y + body.height, area.width, 1);
 
-    let cursor = draw_body(frame, app, body);
+    let cursor = if let Mode::BufferList { selected } = app.mode() {
+        draw_buffer_list(frame, app, body, *selected);
+        None
+    } else {
+        draw_body(frame, app, body)
+    };
     draw_status(frame, app, status);
     place_cursor(frame, app, body, status, cursor);
+}
+
+/// The buffer-list picker: one row per open file, the selected one reversed. Replaces the
+/// document body while [`Mode::BufferList`] is active — the app's rendering stays a single
+/// paragraph, no overlay machinery.
+fn draw_buffer_list(frame: &mut Frame, app: &App, body: Rect, selected: usize) {
+    let lines: Vec<Line> = app
+        .buffer_labels()
+        .into_iter()
+        .enumerate()
+        .map(|(i, (name, dirty))| {
+            let text = format!(" {} {}{} ", i + 1, name, if dirty { "*" } else { "" });
+            let style = if i == selected {
+                Style::default().add_modifier(Modifier::REVERSED)
+            } else {
+                Style::default()
+            };
+            Line::styled(text, style)
+        })
+        .collect();
+    frame.render_widget(Paragraph::new(lines), body);
 }
 
 /// Render the visible document lines, skipping any hidden inside a fold. Returns the cursor's
@@ -78,6 +104,12 @@ fn place_cursor(frame: &mut Frame, app: &App, body: Rect, status: Rect, cursor: 
             let col = "Save as: ".len() + input.chars().count();
             frame.set_cursor_position(Position::new(status.x + col as u16, status.y));
         }
+        Mode::OpenFile { input } => {
+            let col = "Open: ".len() + input.chars().count();
+            frame.set_cursor_position(Position::new(status.x + col as u16, status.y));
+        }
+        // No cursor while picking from the buffer list or answering a confirmation.
+        Mode::BufferList { .. } | Mode::ConfirmClose | Mode::ConfirmQuit => {}
     }
 }
 
@@ -85,24 +117,57 @@ fn is_heading(app: &App, line: usize) -> bool {
     app.outline().headings.iter().any(|h| h.line == line)
 }
 
-/// The status-line text: the Save-As prompt, or `name[*] — line:col` plus any transient message.
+/// The status-line text: the Save-As prompt, or `[i/n] name[*] — line:col` plus any transient
+/// message (the `[i/n]` buffer position appears only when more than one file is open).
 fn status_text(app: &App) -> String {
-    if let Mode::SaveAs { input } = app.mode() {
-        return format!("Save as: {input}");
+    match app.mode() {
+        Mode::SaveAs { input } => return format!("Save as: {input}"),
+        Mode::OpenFile { input } => return format!("Open: {input}"),
+        Mode::BufferList { .. } => {
+            return " Buffers — ↑/↓ or 1-9 select · Enter switch · Esc cancel ".to_string()
+        }
+        Mode::ConfirmClose => {
+            let (name, _) = app.buffer_labels().swap_remove(app.active_index());
+            return format!(" Discard unsaved changes to {name}? (y/n) ");
+        }
+        Mode::ConfirmQuit => {
+            let dirty = app.buffer_labels().iter().filter(|(_, d)| *d).count();
+            return format!(" {dirty} buffer(s) have unsaved changes — quit anyway? (y/n) ");
+        }
+        Mode::Edit => {}
     }
-    let name = app
-        .document()
-        .path()
-        .and_then(|p| p.file_name())
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "[No Name]".to_string());
-    let dirty = if app.document().is_modified() { "*" } else { "" };
+    let position = if app.buffer_count() > 1 {
+        format!("[{}/{}] ", app.active_index() + 1, app.buffer_count())
+    } else {
+        String::new()
+    };
+    let (name, is_dirty) = app.buffer_labels().swap_remove(app.active_index());
+    let dirty = if is_dirty { "*" } else { "" };
     let line = app.view().cursor_line() + 1;
     let col = app.view().cursor_column() + 1;
-    let mut text = format!(" {name}{dirty} — {line}:{col} ");
+    let mut text = format!(" {position}{name}{dirty} — {line}:{col} ");
     if !app.status().is_empty() {
         text.push_str("  ");
         text.push_str(app.status());
     }
     text
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::buffer::Buffer;
+    use textr_org_core::document::Document;
+
+    #[test]
+    fn status_shows_the_buffer_position_only_with_multiple_buffers() {
+        let one = App::new(vec![Buffer::new(Document::from_text("x"), None)]);
+        assert!(!status_text(&one).contains("[1/1]"));
+
+        let two = App::new(vec![
+            Buffer::new(Document::from_text("x"), None),
+            Buffer::new(Document::from_text("y"), None),
+        ]);
+        assert!(status_text(&two).starts_with(" [1/2]"));
+    }
 }
