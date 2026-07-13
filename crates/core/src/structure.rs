@@ -58,9 +58,60 @@ impl Outline {
     }
 }
 
+/// What a structural edit did — either the document changed (and where the cursor should
+/// land) or nothing happened (and why, for the status line).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditOutcome {
+    Changed { cursor_line: usize },
+    NoOp(&'static str),
+}
+
+const NOT_ON_HEADING: &str = "Not inside a heading's subtree";
+
+/// The heading whose subtree contains `line`: the nearest heading at or above it.
+fn enclosing(outline: &Outline, line: usize) -> Option<&Heading> {
+    outline.headings.iter().rev().find(|h| h.line <= line)
+}
+
+/// The heading lines of `h` and every heading inside its subtree.
+fn subtree_member_lines(outline: &Outline, h: &Heading) -> Vec<usize> {
+    outline
+        .headings
+        .iter()
+        .filter(|m| m.line >= h.line && m.line <= h.last_line)
+        .map(|m| m.line)
+        .collect()
+}
+
+/// Swap the block of lines starting at `first_top` (running to `second_top - 1`) with the
+/// block `second_top..=second_last` (two adjacent line blocks). Returns the line where the
+/// second block now starts (= `first_top`). Handles a missing trailing newline at EOF.
+fn swap_blocks(doc: &mut Document, first_top: usize, second_top: usize, second_last: usize) -> usize {
+    let start_a = doc.line_to_char(first_top);
+    let start_b = doc.line_to_char(second_top);
+    let end_b = if second_last + 1 < doc.line_count() {
+        doc.line_to_char(second_last + 1)
+    } else {
+        doc.text().chars().count()
+    };
+    let text = doc.text();
+    let mut a: String = text.chars().skip(start_a).take(start_b - start_a).collect();
+    let mut b: String = text.chars().skip(start_b).take(end_b - start_b).collect();
+    if !b.ends_with('\n') {
+        b.push('\n');
+        if a.ends_with('\n') {
+            a.pop(); // keep the total newline count identical
+        }
+    }
+    doc.remove(start_a..end_b);
+    doc.insert(start_a, &(b + &a));
+    first_top
+}
+
 /// A parser + editor of a particular document format's structure. One implementer per
-/// format (Org today; Markdown next). Everything else in textr talks to structure through
-/// this trait, never to a concrete format.
+/// format (Org and Markdown today). Everything else in textr talks to structure through
+/// this trait, never to a concrete format — the structural-edit operations below are
+/// default methods, written once over `parse` + the two format primitives.
 pub trait StructureProvider {
     /// Scan `doc` into an [`Outline`].
     fn parse(&self, doc: &Document) -> Outline;
@@ -68,6 +119,210 @@ pub trait StructureProvider {
     /// Cycle the TODO keyword on the heading at `line`: none → `TODO` → `DONE` → none.
     /// A no-op if that line is not a heading.
     fn cycle_todo(&self, doc: &mut Document, line: usize);
+
+    /// The heading marker byte (`*` for Org, `#` for Markdown).
+    fn marker(&self) -> u8;
+
+    /// The deepest legal heading level, if the format has one.
+    fn max_level(&self) -> Option<usize>;
+
+    /// Promote the enclosing heading one level (children keep theirs).
+    fn promote_heading(&self, doc: &mut Document, line: usize) -> EditOutcome {
+        let outline = self.parse(doc);
+        let Some(h) = enclosing(&outline, line) else {
+            return EditOutcome::NoOp(NOT_ON_HEADING);
+        };
+        if h.level == 1 {
+            return EditOutcome::NoOp("Already at top level");
+        }
+        let start = doc.line_to_char(h.line);
+        doc.remove(start..start + 1);
+        EditOutcome::Changed { cursor_line: line }
+    }
+
+    /// Demote the enclosing heading one level (children keep theirs).
+    fn demote_heading(&self, doc: &mut Document, line: usize) -> EditOutcome {
+        let outline = self.parse(doc);
+        let Some(h) = enclosing(&outline, line) else {
+            return EditOutcome::NoOp(NOT_ON_HEADING);
+        };
+        if Some(h.level) == self.max_level() {
+            return EditOutcome::NoOp("Markdown headings stop at level 6");
+        }
+        let start = doc.line_to_char(h.line);
+        doc.insert(start, &(self.marker() as char).to_string());
+        EditOutcome::Changed { cursor_line: line }
+    }
+
+    /// Promote the enclosing heading and every heading in its subtree.
+    fn promote_subtree(&self, doc: &mut Document, line: usize) -> EditOutcome {
+        let outline = self.parse(doc);
+        let Some(h) = enclosing(&outline, line) else {
+            return EditOutcome::NoOp(NOT_ON_HEADING);
+        };
+        if h.level == 1 {
+            return EditOutcome::NoOp("Already at top level");
+        }
+        for l in subtree_member_lines(&outline, h) {
+            let start = doc.line_to_char(l);
+            doc.remove(start..start + 1);
+        }
+        EditOutcome::Changed { cursor_line: line }
+    }
+
+    /// Demote the enclosing heading and every heading in its subtree.
+    fn demote_subtree(&self, doc: &mut Document, line: usize) -> EditOutcome {
+        let outline = self.parse(doc);
+        let Some(h) = enclosing(&outline, line) else {
+            return EditOutcome::NoOp(NOT_ON_HEADING);
+        };
+        if let Some(max) = self.max_level() {
+            let too_deep = outline
+                .headings
+                .iter()
+                .any(|m| m.line >= h.line && m.line <= h.last_line && m.level == max);
+            if too_deep {
+                return EditOutcome::NoOp("Markdown headings stop at level 6");
+            }
+        }
+        let m = (self.marker() as char).to_string();
+        for l in subtree_member_lines(&outline, h) {
+            let start = doc.line_to_char(l);
+            doc.insert(start, &m);
+        }
+        EditOutcome::Changed { cursor_line: line }
+    }
+
+    /// Swap the enclosing subtree with the previous same-level sibling subtree.
+    fn move_subtree_up(&self, doc: &mut Document, line: usize) -> EditOutcome {
+        let outline = self.parse(doc);
+        let Some(h) = enclosing(&outline, line) else {
+            return EditOutcome::NoOp(NOT_ON_HEADING);
+        };
+        // The previous sibling is the heading whose subtree ends right above ours.
+        let Some(prev) = outline
+            .headings
+            .iter()
+            .find(|p| p.level == h.level && p.last_line + 1 == h.line)
+        else {
+            return EditOutcome::NoOp("No previous sibling at this level");
+        };
+        let offset = line - h.line;
+        let new_top = swap_blocks(doc, prev.line, h.line, h.last_line);
+        EditOutcome::Changed { cursor_line: new_top + offset }
+    }
+
+    /// Swap the enclosing subtree with the next same-level sibling subtree.
+    fn move_subtree_down(&self, doc: &mut Document, line: usize) -> EditOutcome {
+        let outline = self.parse(doc);
+        let Some(h) = enclosing(&outline, line) else {
+            return EditOutcome::NoOp(NOT_ON_HEADING);
+        };
+        let Some(next) = outline
+            .headings
+            .iter()
+            .find(|n| n.line == h.last_line + 1 && n.level == h.level)
+        else {
+            return EditOutcome::NoOp("No next sibling at this level");
+        };
+        let next_len = next.last_line - next.line + 1;
+        swap_blocks(doc, h.line, next.line, next.last_line);
+        EditOutcome::Changed { cursor_line: line + next_len }
+    }
+
+    /// Insert a new (possibly `TODO`) sibling heading after the enclosing subtree; with no
+    /// enclosing heading, append a level-1 heading at the end of the document.
+    fn insert_sibling(&self, doc: &mut Document, line: usize, todo: bool) -> EditOutcome {
+        let outline = self.parse(doc);
+        let (level, target_line) = match enclosing(&outline, line) {
+            Some(h) => (h.level, h.last_line + 1),
+            None => (1, doc.line_count()),
+        };
+        let markers = (self.marker() as char).to_string().repeat(level);
+        let keyword = if todo { "TODO " } else { "" };
+        let (at, prefix) = if target_line < doc.line_count() {
+            (doc.line_to_char(target_line), "")
+        } else {
+            let end = doc.text().chars().count();
+            let needs_nl = end > 0 && !doc.text().ends_with('\n');
+            (end, if needs_nl { "\n" } else { "" })
+        };
+        doc.insert(at, &format!("{prefix}{markers} {keyword}\n"));
+        let cursor_line = doc.char_to_line(at + prefix.chars().count());
+        EditOutcome::Changed { cursor_line }
+    }
+
+    /// Cycle the `[#X]` cookie on the enclosing heading: up = none→C→B→A, down = A→B→C→none.
+    fn cycle_priority(&self, doc: &mut Document, line: usize, up: bool) -> EditOutcome {
+        let outline = self.parse(doc);
+        let Some(h) = enclosing(&outline, line) else {
+            return EditOutcome::NoOp(NOT_ON_HEADING);
+        };
+        let new = match (h.priority, up) {
+            (None, true) => Some('C'),
+            (Some('C'), true) => Some('B'),
+            (Some('B'), true) => Some('A'),
+            (Some(_), true) => return EditOutcome::NoOp("Already at highest priority"),
+            (None, false) => return EditOutcome::NoOp("No priority to lower"),
+            (Some('A'), false) => Some('B'),
+            (Some('B'), false) => Some('C'),
+            (Some(_), false) => None,
+        };
+        // Everything before the cookie is ASCII (markers, spaces, keyword), so byte
+        // offsets equal char offsets.
+        let raw = doc.line_text(h.line);
+        let text = raw.strip_suffix('\n').unwrap_or(&raw);
+        let after_markers = &text[h.level..];
+        let mut pos = h.level + (after_markers.len() - after_markers.trim_start().len());
+        let rest = after_markers.trim_start();
+        if split_todo_keyword(rest).0.is_some() {
+            let after_kw = &rest[4..]; // TODO and DONE are both 4 ASCII bytes
+            pos += 4 + (after_kw.len() - after_kw.trim_start().len());
+        }
+        let start = doc.line_to_char(h.line) + pos;
+        // A cookie is 4 chars: `[#X]`.
+        match (h.priority, new) {
+            (None, Some(p)) => doc.insert(start, &format!("[#{p}] ")),
+            (Some(_), Some(p)) => {
+                doc.remove(start..start + 4);
+                doc.insert(start, &format!("[#{p}]"));
+            }
+            (Some(_), None) => {
+                let followed_by_space = text.get(pos + 4..).is_some_and(|t| t.starts_with(' '));
+                doc.remove(start..start + if followed_by_space { 5 } else { 4 });
+            }
+            (None, None) => unreachable!(),
+        }
+        EditOutcome::Changed { cursor_line: line }
+    }
+
+    /// Replace the enclosing heading's trailing tag run with `tags` (empty = remove).
+    /// Tags must already satisfy [`is_valid_tag`].
+    fn set_tags(&self, doc: &mut Document, line: usize, tags: &[String]) -> EditOutcome {
+        let outline = self.parse(doc);
+        let Some(h) = enclosing(&outline, line) else {
+            return EditOutcome::NoOp(NOT_ON_HEADING);
+        };
+        let raw = doc.line_text(h.line);
+        let text = raw.strip_suffix('\n').unwrap_or(&raw).to_string();
+        let prefix = match tag_run_start(&text) {
+            Some(i) => text[..i].trim_end(),
+            None => text.trim_end(),
+        };
+        let mut new_line = prefix.to_string();
+        if !tags.is_empty() {
+            new_line.push_str(&format!(" :{}:", tags.join(":")));
+        }
+        let start = doc.line_to_char(h.line);
+        doc.remove(start..start + text.chars().count());
+        doc.insert(start, &new_line);
+        EditOutcome::Changed { cursor_line: line }
+    }
+}
+
+/// Whether `tag` is a legal tag name (non-empty, only letters/digits/`_@#%`).
+pub fn is_valid_tag(tag: &str) -> bool {
+    !tag.is_empty() && tag.chars().all(is_tag_char)
 }
 
 // ---- navigation (pure free functions over an Outline) ---------------------
@@ -110,7 +365,7 @@ impl StructureProvider for OrgProvider {
         let mut headings: Vec<Heading> = (0..doc.line_count())
             .filter_map(|line| parse_org_heading(&doc.line_text(line), line))
             .collect();
-        fill_subtree_extents(&mut headings, doc.line_count().saturating_sub(1));
+        fill_subtree_extents(&mut headings, last_content_line(doc));
         Outline { headings }
     }
 
@@ -121,6 +376,25 @@ impl StructureProvider for OrgProvider {
             return; // not a heading — leave the buffer untouched
         };
         cycle_keyword(doc, line, heading.level);
+    }
+
+    fn marker(&self) -> u8 {
+        b'*'
+    }
+
+    fn max_level(&self) -> Option<usize> {
+        None
+    }
+}
+
+/// The last line holding content. A text ending in `\n` has a phantom empty final line in
+/// the rope's count; subtree extents (and the cursor math built on them) must not include it.
+fn last_content_line(doc: &Document) -> usize {
+    let last = doc.line_count().saturating_sub(1);
+    if last > 0 && doc.line_text(last).is_empty() {
+        last - 1
+    } else {
+        last
     }
 }
 
@@ -218,6 +492,20 @@ impl StructureProvider for Format {
             Format::Markdown => MarkdownProvider.cycle_todo(doc, line),
         }
     }
+
+    fn marker(&self) -> u8 {
+        match self {
+            Format::Org => OrgProvider.marker(),
+            Format::Markdown => MarkdownProvider.marker(),
+        }
+    }
+
+    fn max_level(&self) -> Option<usize> {
+        match self {
+            Format::Org => OrgProvider.max_level(),
+            Format::Markdown => MarkdownProvider.max_level(),
+        }
+    }
 }
 
 /// The format for a file path: `.md`/`.markdown` (ASCII-case-insensitive) is Markdown;
@@ -265,7 +553,7 @@ impl StructureProvider for MarkdownProvider {
                 }
             }
         }
-        fill_subtree_extents(&mut headings, doc.line_count().saturating_sub(1));
+        fill_subtree_extents(&mut headings, last_content_line(doc));
         Outline { headings }
     }
 
@@ -279,6 +567,14 @@ impl StructureProvider for MarkdownProvider {
             return; // not a heading — leave the buffer untouched
         };
         cycle_keyword(doc, line, heading.level);
+    }
+
+    fn marker(&self) -> u8 {
+        b'#'
+    }
+
+    fn max_level(&self) -> Option<usize> {
+        Some(6)
     }
 }
 
@@ -714,6 +1010,188 @@ mod tests {
         assert_eq!(h.priority, Some('C'));
         assert_eq!(h.title, "ship");
         assert_eq!(h.tags, vec!["rel"]);
+    }
+
+    // ---- structural edits -------------------------------------------------------
+
+    #[test]
+    fn providers_expose_marker_and_max_level() {
+        assert_eq!(OrgProvider.marker(), b'*');
+        assert_eq!(OrgProvider.max_level(), None);
+        assert_eq!(MarkdownProvider.marker(), b'#');
+        assert_eq!(MarkdownProvider.max_level(), Some(6));
+        assert_eq!(Format::Markdown.marker(), b'#'); // enum delegates
+    }
+
+    #[test]
+    fn promote_and_demote_change_one_heading_level() {
+        let mut doc = Document::from_text("** A\n*** child\n");
+        assert_eq!(
+            OrgProvider.promote_heading(&mut doc, 0),
+            EditOutcome::Changed { cursor_line: 0 }
+        );
+        assert_eq!(doc.text(), "* A\n*** child\n"); // child untouched
+        assert_eq!(
+            OrgProvider.demote_heading(&mut doc, 0),
+            EditOutcome::Changed { cursor_line: 0 }
+        );
+        assert_eq!(doc.text(), "** A\n*** child\n");
+    }
+
+    #[test]
+    fn edits_target_the_enclosing_heading_from_a_body_line() {
+        let mut doc = Document::from_text("** A\nbody\n");
+        OrgProvider.demote_heading(&mut doc, 1); // cursor on "body"
+        assert_eq!(doc.text(), "*** A\nbody\n");
+    }
+
+    #[test]
+    fn promote_refuses_at_level_1_and_demote_at_markdown_max() {
+        let mut doc = Document::from_text("* top\n");
+        assert!(matches!(OrgProvider.promote_heading(&mut doc, 0), EditOutcome::NoOp(_)));
+        let mut doc = Document::from_text("###### deep\n");
+        assert!(matches!(MarkdownProvider.demote_heading(&mut doc, 0), EditOutcome::NoOp(_)));
+        let mut doc = Document::from_text("plain\n");
+        assert!(matches!(OrgProvider.promote_heading(&mut doc, 0), EditOutcome::NoOp(_)));
+    }
+
+    #[test]
+    fn subtree_promote_and_demote_shift_every_member() {
+        let mut doc = Document::from_text("** A\nbody\n*** B\n** next\n");
+        OrgProvider.demote_subtree(&mut doc, 0);
+        assert_eq!(doc.text(), "*** A\nbody\n**** B\n** next\n"); // sibling untouched
+        OrgProvider.promote_subtree(&mut doc, 0);
+        assert_eq!(doc.text(), "** A\nbody\n*** B\n** next\n");
+    }
+
+    #[test]
+    fn subtree_demote_refuses_if_any_member_would_pass_markdown_max() {
+        let mut doc = Document::from_text("##### A\n###### deep child\n");
+        assert!(matches!(MarkdownProvider.demote_subtree(&mut doc, 0), EditOutcome::NoOp(_)));
+        assert_eq!(doc.text(), "##### A\n###### deep child\n"); // untouched
+    }
+
+    #[test]
+    fn move_subtree_swaps_with_the_adjacent_same_level_sibling() {
+        let text = "* A\na body\n** A child\n* B\nb body\n";
+        let mut doc = Document::from_text(text);
+        // Cursor on "a body" (line 1): A's 3-line subtree swaps with B's 2-line one.
+        assert_eq!(
+            OrgProvider.move_subtree_down(&mut doc, 1),
+            EditOutcome::Changed { cursor_line: 3 }
+        );
+        assert_eq!(doc.text(), "* B\nb body\n* A\na body\n** A child\n");
+        assert_eq!(
+            OrgProvider.move_subtree_up(&mut doc, 3),
+            EditOutcome::Changed { cursor_line: 1 }
+        );
+        assert_eq!(doc.text(), text);
+    }
+
+    #[test]
+    fn move_refuses_at_the_edges_and_across_parents() {
+        let mut doc = Document::from_text("* A\n* B\n");
+        assert!(matches!(OrgProvider.move_subtree_up(&mut doc, 0), EditOutcome::NoOp(_)));
+        assert!(matches!(OrgProvider.move_subtree_down(&mut doc, 1), EditOutcome::NoOp(_)));
+        // A child may not escape its parent in either direction.
+        let mut doc = Document::from_text("* P1\n** only child\n* P2\n");
+        assert!(matches!(OrgProvider.move_subtree_up(&mut doc, 1), EditOutcome::NoOp(_)));
+        assert!(matches!(OrgProvider.move_subtree_down(&mut doc, 1), EditOutcome::NoOp(_)));
+    }
+
+    #[test]
+    fn move_down_at_end_of_buffer_without_trailing_newline_keeps_text_intact() {
+        let mut doc = Document::from_text("* A\n* B no newline");
+        OrgProvider.move_subtree_down(&mut doc, 0);
+        assert_eq!(doc.text(), "* B no newline\n* A");
+    }
+
+    #[test]
+    fn insert_sibling_lands_after_the_current_subtree_at_the_same_level() {
+        let mut doc = Document::from_text("** A\nbody\n* next\n");
+        // Cursor on "body": sibling of A (level 2) goes before "* next".
+        assert_eq!(
+            OrgProvider.insert_sibling(&mut doc, 1, false),
+            EditOutcome::Changed { cursor_line: 2 }
+        );
+        assert_eq!(doc.text(), "** A\nbody\n** \n* next\n");
+    }
+
+    #[test]
+    fn insert_todo_sibling_carries_the_keyword() {
+        let mut doc = Document::from_text("# A\n");
+        MarkdownProvider.insert_sibling(&mut doc, 0, true);
+        assert_eq!(doc.text(), "# A\n# TODO \n");
+    }
+
+    #[test]
+    fn insert_at_end_of_buffer_without_trailing_newline() {
+        let mut doc = Document::from_text("* A\nbody no newline");
+        assert_eq!(
+            OrgProvider.insert_sibling(&mut doc, 1, false),
+            EditOutcome::Changed { cursor_line: 2 }
+        );
+        assert_eq!(doc.text(), "* A\nbody no newline\n* \n");
+    }
+
+    #[test]
+    fn insert_with_no_enclosing_heading_appends_a_level_1_heading() {
+        let mut doc = Document::from_text("just prose\n");
+        assert_eq!(
+            OrgProvider.insert_sibling(&mut doc, 0, false),
+            EditOutcome::Changed { cursor_line: 1 }
+        );
+        assert_eq!(doc.text(), "just prose\n* \n");
+    }
+
+    #[test]
+    fn priority_up_walks_none_c_b_a_and_stops() {
+        let mut doc = Document::from_text("* TODO task\n");
+        OrgProvider.cycle_priority(&mut doc, 0, true);
+        assert_eq!(doc.text(), "* TODO [#C] task\n"); // cookie after the keyword
+        OrgProvider.cycle_priority(&mut doc, 0, true);
+        OrgProvider.cycle_priority(&mut doc, 0, true);
+        assert_eq!(doc.text(), "* TODO [#A] task\n");
+        assert!(matches!(OrgProvider.cycle_priority(&mut doc, 0, true), EditOutcome::NoOp(_)));
+    }
+
+    #[test]
+    fn priority_down_walks_a_b_c_none_and_stops() {
+        let mut doc = Document::from_text("## [#A] task\n"); // Markdown, no keyword
+        MarkdownProvider.cycle_priority(&mut doc, 0, false);
+        assert_eq!(doc.text(), "## [#B] task\n");
+        MarkdownProvider.cycle_priority(&mut doc, 0, false);
+        MarkdownProvider.cycle_priority(&mut doc, 0, false);
+        assert_eq!(doc.text(), "## task\n"); // cookie and its space removed
+        assert!(matches!(
+            MarkdownProvider.cycle_priority(&mut doc, 0, false),
+            EditOutcome::NoOp(_)
+        ));
+    }
+
+    #[test]
+    fn priority_on_a_bare_cookie_headline_removes_cleanly() {
+        let mut doc = Document::from_text("* DONE [#C]\n"); // keyword, cookie, no title
+        OrgProvider.cycle_priority(&mut doc, 0, false);
+        assert_eq!(doc.text(), "* DONE \n");
+    }
+
+    #[test]
+    fn set_tags_appends_replaces_and_removes() {
+        let mut doc = Document::from_text("* TODO task\n");
+        OrgProvider.set_tags(&mut doc, 0, &["work".into(), "urgent".into()]);
+        assert_eq!(doc.text(), "* TODO task :work:urgent:\n");
+        OrgProvider.set_tags(&mut doc, 0, &["home".into()]); // replaces, not appends
+        assert_eq!(doc.text(), "* TODO task :home:\n");
+        OrgProvider.set_tags(&mut doc, 0, &[]); // removes
+        assert_eq!(doc.text(), "* TODO task\n");
+    }
+
+    #[test]
+    fn is_valid_tag_enforces_the_character_set() {
+        assert!(is_valid_tag("a_1@b"));
+        assert!(!is_valid_tag("has space"));
+        assert!(!is_valid_tag(""));
     }
 
     // ---- Format detection -----------------------------------------------------
