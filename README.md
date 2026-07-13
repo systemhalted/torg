@@ -86,14 +86,20 @@ detail — including the north star of Org-mode–class structure editing for an
 
 1. **Core document model** — rope buffer, open/save, edits — *done*
 2. **TUI + Org outline core** — open/edit/save; folding, heading nav, TODO cycling; multiple
-   buffers with switching — *done (current)*
+   buffers with switching — *done*
 3. **Markdown provider + structural editing** — 2nd provider *(done)*; promote/demote, move
-   subtrees *(remaining)*
-4. **Rich content** — tables, lists, links, timestamps
-5. **Agenda** — multi-file collection, a date model
-6. **Babel** — sandboxed source-block execution
-7. **Export** — HTML / Markdown / LaTeX from the structure model
-8. **GUI** — a desktop frontend reusing the *same* core
+   subtrees, priorities, tags — *(current)*
+4. **Rich content** — tables, lists/checkboxes, links, timestamps, markup, drawers
+5. **Agenda** — multi-file views, sparse trees, custom keywords, dependencies
+6. **Organize** — capture, refile, archive
+7. **Time** — clocking, clock tables, repeaters, effort estimates
+8. **Babel** — sandboxed source-block execution, tangle
+9. **Export & publish** — HTML / LaTeX / Markdown / iCalendar, publishing projects
+10. **Extensibility & advanced views** — custom links, column view, package API
+11. **GUI** — a desktop frontend reusing the *same* core
+
+The full map from [Org mode's feature set](https://orgmode.org/features.html) to these
+milestones is the coverage table in [`docs/roadmap.md`](docs/roadmap.md).
 
 ## License
 

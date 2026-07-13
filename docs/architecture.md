@@ -123,7 +123,7 @@ pub fn detect_format(path: Option<&Path>) -> Format; // .md/.markdown → Markdo
 - `MarkdownProvider` (M3) is the second implementer — the test that the trait is genuinely
   format-agnostic, which folding, navigation, and TODO cycling passed without change. Its
   parse is stateful (headings inside fenced code blocks are skipped), so its `cycle_todo`
-  checks the full parse rather than one line. Agenda (M5) and export (M7) consume this same
+  checks the full parse rather than one line. Agenda (M5) and export (M9) consume this same
   model, so they too are written once against the trait rather than per-format.
 - **Which format a buffer uses is per-buffer TUI state** (`Buffer.format`), chosen by
   `detect_format` from the file extension at buffer creation and re-detected on *Save As*.
@@ -143,7 +143,7 @@ it depends on terminal height, which core must never know about. The rule holds 
 depends on how the buffer is *displayed* stays above the core boundary; anything intrinsic to
 the *text and its structure* stays in core.
 
-## Generalizing to the GUI (M8)
+## Generalizing to the GUI (M11)
 
 The desktop frontend reuses `crates/core` unchanged **and** the driver-agnostic state + render
 tiers; only the terminal driver is replaced by a windowing driver. That the same `Outline`,

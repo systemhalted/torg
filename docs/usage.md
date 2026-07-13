@@ -129,4 +129,4 @@ This is the first runnable milestone; several things are deliberately out of sco
   full-width CJK or grapheme clusters can misalign visually.
 - **Structure basics only** — no promote/demote or subtree moves, no tables, timestamps,
   agenda, source-block execution, or export yet. See [`roadmap.md`](roadmap.md) for where these
-  land (M3–M7).
+  land (M3–M10).
