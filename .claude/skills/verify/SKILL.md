@@ -44,5 +44,9 @@ the final quit or treat "server gone after Ctrl+Q" as a successful exit.
 ## Gotchas
 
 - Keys arrive via crossterm: tmux names `M-n`, `C-q`, `Escape`, `Tab` all work.
+- **Type text with `send-keys -l "..."`** — without `-l`, strings that happen to be key
+  names match case-insensitively (`"end"` sends the End key, not e-n-d) and the "typed"
+  text silently never arrives.
+- Check cursor placement with `tmux display-message -p '#{cursor_x},#{cursor_y}'`.
 - The status row is `capture-pane | tail -1` (reversed style doesn't survive capture; text does).
 - `cargo run` inside tmux adds compile noise; run the built `target/debug/torg` directly.

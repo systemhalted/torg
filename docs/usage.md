@@ -35,7 +35,7 @@ torg notes.org ideas.org  # several files — the first is shown, Alt+N reaches 
 | `Enter` | Split the line (insert a newline). |
 | `Backspace` | Delete the character before the cursor; at column 0, join onto the previous line. |
 | `Delete` | Delete the character at the cursor; at a line's end, pull the next line up. |
-| `Tab` | On a heading line, fold/unfold its subtree. Elsewhere, insert a tab. |
+| `Tab` | On a heading line, fold/unfold its subtree. Elsewhere, insert a tab (displayed at 4-column tab stops). |
 | `Ctrl+N` / `Ctrl+P` | Jump to the next / previous heading. |
 | `Ctrl+T` | Cycle the current heading's keyword: none → `TODO` → `DONE` → none. |
 | `Ctrl+S` | Save (opens the *Save As* prompt for an untitled buffer). |

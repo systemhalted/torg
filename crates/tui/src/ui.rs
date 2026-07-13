@@ -48,6 +48,41 @@ fn draw_buffer_list(frame: &mut Frame, app: &App, body: Rect, selected: usize) {
     frame.render_widget(Paragraph::new(lines), body);
 }
 
+/// How many columns a tab advances: to the next multiple of 4.
+const TAB_WIDTH: usize = 4;
+
+/// Expand tabs to spaces at [`TAB_WIDTH`]-column stops. The terminal widget renders a raw
+/// `\t` as a zero-width cell, garbling the row — every line must pass through here.
+fn expand_tabs(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut col = 0;
+    for c in text.chars() {
+        if c == '\t' {
+            let next_stop = (col / TAB_WIDTH + 1) * TAB_WIDTH;
+            out.extend(std::iter::repeat_n(' ', next_stop - col));
+            col = next_stop;
+        } else {
+            out.push(c);
+            col += 1;
+        }
+    }
+    out
+}
+
+/// The display column of character index `char_col` in `text` — the same tab-stop rule as
+/// [`expand_tabs`], so the hardware cursor lands where the character was drawn.
+fn display_col(text: &str, char_col: usize) -> usize {
+    let mut col = 0;
+    for c in text.chars().take(char_col) {
+        col = if c == '\t' {
+            (col / TAB_WIDTH + 1) * TAB_WIDTH
+        } else {
+            col + 1
+        };
+    }
+    col
+}
+
 /// Render the visible document lines, skipping any hidden inside a fold. Returns the cursor's
 /// on-screen `(column, row)` within `body`, if the cursor line is visible.
 fn draw_body(frame: &mut Frame, app: &App, body: Rect) -> Option<(u16, u16)> {
@@ -68,11 +103,13 @@ fn draw_body(frame: &mut Frame, app: &App, body: Rect) -> Option<(u16, u16)> {
         while text.ends_with('\n') || text.ends_with('\r') {
             text.pop();
         }
+        if doc_line == cursor_line {
+            let col = display_col(&text, app.view().cursor_column());
+            cursor = Some((col as u16, lines.len() as u16));
+        }
+        let mut text = expand_tabs(&text);
         if app.is_folded_heading(doc_line) {
             text.push_str(" …"); // a collapsed subtree
-        }
-        if doc_line == cursor_line {
-            cursor = Some((app.view().cursor_column() as u16, lines.len() as u16));
         }
         let style = if is_heading(app, doc_line) {
             Style::default().add_modifier(Modifier::BOLD)
@@ -158,6 +195,27 @@ mod tests {
     use super::*;
     use crate::buffer::Buffer;
     use textr_org_core::document::Document;
+
+    #[test]
+    fn expand_tabs_advances_to_the_next_tab_stop() {
+        assert_eq!(expand_tabs("\tx"), "    x"); // tab at col 0 → stop at 4
+        assert_eq!(expand_tabs("ab\tx"), "ab  x"); // tab at col 2 → stop at 4
+        assert_eq!(expand_tabs("abcd\tx"), "abcd    x"); // tab at a stop → full width
+        assert_eq!(expand_tabs("a\tb\tc"), "a   b   c"); // multiple tabs
+        assert_eq!(expand_tabs("no tabs"), "no tabs");
+    }
+
+    #[test]
+    fn display_col_maps_char_columns_through_tabs() {
+        // "\tx": char 0 is the tab (display 0), char 1 is 'x' at display 4.
+        assert_eq!(display_col("\tx", 0), 0);
+        assert_eq!(display_col("\tx", 1), 4);
+        assert_eq!(display_col("\tx", 2), 5); // end of line
+        // "ab\tx": 'x' is char 3, display 4.
+        assert_eq!(display_col("ab\tx", 3), 4);
+        // No tabs: identity.
+        assert_eq!(display_col("plain", 3), 3);
+    }
 
     #[test]
     fn status_shows_the_buffer_position_only_with_multiple_buffers() {
