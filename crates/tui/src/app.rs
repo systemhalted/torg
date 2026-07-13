@@ -278,6 +278,8 @@ impl App {
                     self.close_active_buffer();
                 }
             }
+            // Wired in the next step of the plan (Task 10/11).
+            _ => {}
         }
     }
 

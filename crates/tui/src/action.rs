@@ -37,6 +37,18 @@ pub enum Action {
     PrevBuffer,
     ListBuffers,
     CloseBuffer,
+    // structural editing
+    PromoteHeading,
+    DemoteHeading,
+    PromoteSubtree,
+    DemoteSubtree,
+    MoveSubtreeUp,
+    MoveSubtreeDown,
+    InsertSibling,
+    InsertTodoSibling,
+    PriorityUp,
+    PriorityDown,
+    EditTags,
 }
 
 /// Map a key press to an [`Action`], or `None` if the key is unbound.
@@ -50,7 +62,19 @@ pub fn key_to_action(key: KeyEvent) -> Option<Action> {
     }
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
     let alt = key.modifiers.contains(KeyModifiers::ALT);
+    let shift = key.modifiers.contains(KeyModifiers::SHIFT);
     match key.code {
+        // Structural-editing chords come before the plain arms they modify.
+        KeyCode::Left if alt && shift => Some(Action::PromoteSubtree),
+        KeyCode::Right if alt && shift => Some(Action::DemoteSubtree),
+        KeyCode::Left if alt => Some(Action::PromoteHeading),
+        KeyCode::Right if alt => Some(Action::DemoteHeading),
+        KeyCode::Up if alt => Some(Action::MoveSubtreeUp),
+        KeyCode::Down if alt => Some(Action::MoveSubtreeDown),
+        KeyCode::Up if shift => Some(Action::PriorityUp),
+        KeyCode::Down if shift => Some(Action::PriorityDown),
+        KeyCode::Enter if alt && shift => Some(Action::InsertTodoSibling),
+        KeyCode::Enter if alt => Some(Action::InsertSibling),
         KeyCode::Left => Some(Action::MoveLeft),
         KeyCode::Right => Some(Action::MoveRight),
         KeyCode::Up => Some(Action::MoveUp),
@@ -73,6 +97,7 @@ pub fn key_to_action(key: KeyEvent) -> Option<Action> {
             'o' => Some(Action::OpenFile),
             'b' => Some(Action::ListBuffers),
             'w' => Some(Action::CloseBuffer),
+            'g' => Some(Action::EditTags),
             _ => None,
         },
         // Alt chords: buffer commands (echoing Ctrl+N/P's heading navigation).
@@ -99,6 +124,15 @@ mod tests {
     }
     fn alt(c: char) -> KeyEvent {
         KeyEvent::new(KeyCode::Char(c), KeyModifiers::ALT)
+    }
+    fn shift(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::SHIFT)
+    }
+    fn alt_key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::ALT)
+    }
+    fn alt_shift(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::ALT | KeyModifiers::SHIFT)
     }
 
     #[test]
@@ -163,6 +197,27 @@ mod tests {
     #[test]
     fn an_alt_modified_char_is_not_inserted() {
         assert_eq!(key_to_action(alt('x')), None);
+    }
+
+    #[test]
+    fn structural_editing_chords_map() {
+        assert_eq!(key_to_action(alt_key(KeyCode::Left)), Some(Action::PromoteHeading));
+        assert_eq!(key_to_action(alt_key(KeyCode::Right)), Some(Action::DemoteHeading));
+        assert_eq!(key_to_action(alt_shift(KeyCode::Left)), Some(Action::PromoteSubtree));
+        assert_eq!(key_to_action(alt_shift(KeyCode::Right)), Some(Action::DemoteSubtree));
+        assert_eq!(key_to_action(alt_key(KeyCode::Up)), Some(Action::MoveSubtreeUp));
+        assert_eq!(key_to_action(alt_key(KeyCode::Down)), Some(Action::MoveSubtreeDown));
+        assert_eq!(key_to_action(alt_key(KeyCode::Enter)), Some(Action::InsertSibling));
+        assert_eq!(key_to_action(alt_shift(KeyCode::Enter)), Some(Action::InsertTodoSibling));
+        assert_eq!(key_to_action(shift(KeyCode::Up)), Some(Action::PriorityUp));
+        assert_eq!(key_to_action(shift(KeyCode::Down)), Some(Action::PriorityDown));
+        assert_eq!(key_to_action(ctrl('g')), Some(Action::EditTags));
+    }
+
+    #[test]
+    fn plain_arrows_and_enter_still_map_to_movement_and_newline() {
+        assert_eq!(key_to_action(press(KeyCode::Left)), Some(Action::MoveLeft)); // regression
+        assert_eq!(key_to_action(press(KeyCode::Enter)), Some(Action::Newline));
     }
 
     #[test]
