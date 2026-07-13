@@ -30,10 +30,15 @@ pub struct Heading {
     pub level: usize,
     /// The line the heading sits on (0-based).
     pub line: usize,
-    /// The heading text, with the leading markers and any TODO keyword stripped.
+    /// The heading text, with the markers, TODO keyword, priority cookie, and trailing
+    /// tags stripped.
     pub title: String,
     /// The heading's TODO state, if it carries a keyword.
     pub todo: Option<TodoState>,
+    /// The `[#X]` priority cookie (A–C) after the keyword, if present.
+    pub priority: Option<char>,
+    /// The `:tag:` run at the end of the headline, colons stripped.
+    pub tags: Vec<String>,
     /// The last line of this heading's subtree. The foldable body is the (possibly empty)
     /// range `line + 1 ..= last_line`.
     pub last_line: usize,
@@ -174,12 +179,14 @@ fn parse_org_heading(raw: &str, line: usize) -> Option<Heading> {
     if rest.is_empty() {
         return None; // "* " with no title is body, not a heading
     }
-    let (todo, title) = split_todo_keyword(rest);
+    let (todo, priority, title, tags) = parse_headline_rest(rest);
     Some(Heading {
         level,
         line,
-        title: title.to_string(),
+        title,
         todo,
+        priority,
+        tags,
         last_line: line,
     })
 }
@@ -326,14 +333,93 @@ fn parse_md_heading(raw: &str, line: usize) -> Option<Heading> {
     if rest.is_empty() {
         return None; // "# " with no title is body, not a heading
     }
-    let (todo, title) = split_todo_keyword(rest);
+    let (todo, priority, title, tags) = parse_headline_rest(rest);
     Some(Heading {
         level,
         line,
-        title: title.to_string(),
+        title,
         todo,
+        priority,
+        tags,
         last_line: line,
     })
+}
+
+/// Split keyword, priority cookie, title, and trailing tags off a headline's text
+/// (everything after the markers and their space).
+fn parse_headline_rest(rest: &str) -> (Option<TodoState>, Option<char>, String, Vec<String>) {
+    let (todo, rest) = split_todo_keyword(rest);
+    let (priority, rest) = split_priority(rest);
+    let (title, tags) = split_tags(rest);
+    (todo, priority, title, tags)
+}
+
+/// Split a leading `[#A]`/`[#B]`/`[#C]` cookie. It must be followed by a space or the end
+/// of the line; anything else stays in the title.
+fn split_priority(rest: &str) -> (Option<char>, &str) {
+    let Some(tail) = rest.strip_prefix("[#") else {
+        return (None, rest);
+    };
+    let bytes = tail.as_bytes();
+    match (bytes.first(), bytes.get(1)) {
+        (Some(p @ b'A'..=b'C'), Some(b']')) => {
+            let after = &tail[2..];
+            if after.is_empty() {
+                (Some(*p as char), "")
+            } else if let Some(t) = after.strip_prefix(' ') {
+                (Some(*p as char), t.trim_start())
+            } else {
+                (None, rest)
+            }
+        }
+        _ => (None, rest),
+    }
+}
+
+/// A character allowed inside a tag: letters, digits, `_ @ # %` (the Org manual's rule).
+fn is_tag_char(c: char) -> bool {
+    c.is_alphanumeric() || matches!(c, '_' | '@' | '#' | '%')
+}
+
+/// Whether `s` is a complete tag run like `:a:b:`.
+fn is_tag_run(s: &str) -> bool {
+    s.len() >= 3
+        && s.starts_with(':')
+        && s.ends_with(':')
+        && s[1..s.len() - 1]
+            .split(':')
+            .all(|t| !t.is_empty() && t.chars().all(is_tag_char))
+}
+
+/// Byte index where a trailing tag run starts in `text` (after trailing-whitespace trim),
+/// or `None` if the line doesn't end in one.
+fn tag_run_start(text: &str) -> Option<usize> {
+    let trimmed = text.trim_end();
+    if !trimmed.ends_with(':') {
+        return None;
+    }
+    let start = trimmed
+        .char_indices()
+        .rev()
+        .find(|(_, c)| c.is_whitespace())
+        .map(|(i, c)| i + c.len_utf8())
+        .unwrap_or(0);
+    is_tag_run(&trimmed[start..]).then_some(start)
+}
+
+/// Split a trailing `:tag:` run off the title.
+fn split_tags(rest: &str) -> (String, Vec<String>) {
+    match tag_run_start(rest) {
+        Some(start) => {
+            let tags = rest.trim_end()[start..]
+                .trim_matches(':')
+                .split(':')
+                .map(str::to_string)
+                .collect();
+            (rest[..start].trim_end().to_string(), tags)
+        }
+        None => (rest.trim_end().to_string(), Vec::new()),
+    }
 }
 
 /// Split a leading `TODO`/`DONE` keyword off the heading text. The keyword only counts as
@@ -579,6 +665,55 @@ mod tests {
         let mut doc = Document::from_text("# DONE\n");
         MarkdownProvider.cycle_todo(&mut doc, 0);
         assert_eq!(doc.text(), "# \n");
+    }
+
+    // ---- headline metadata: priorities and tags -------------------------------
+
+    #[test]
+    fn parses_priority_cookie_after_the_keyword() {
+        let o = outline("* TODO [#A] write\n");
+        let h = &o.headings[0];
+        assert_eq!(h.todo, Some(TodoState::Todo));
+        assert_eq!(h.priority, Some('A'));
+        assert_eq!(h.title, "write");
+        let o = outline("* [#B] plain\n"); // cookie without keyword
+        assert_eq!(o.headings[0].priority, Some('B'));
+        assert_eq!(o.headings[0].title, "plain");
+    }
+
+    #[test]
+    fn a_malformed_cookie_stays_in_the_title() {
+        assert_eq!(outline("* [#D] x\n").headings[0].priority, None); // only A-C
+        assert_eq!(outline("* [#D] x\n").headings[0].title, "[#D] x");
+        assert_eq!(outline("* [#A]x\n").headings[0].priority, None); // no space after
+    }
+
+    #[test]
+    fn parses_trailing_tags_out_of_the_title() {
+        let o = outline("* TODO [#A] fix bug :work:urgent:\n");
+        assert_eq!(o.headings[0].tags, vec!["work", "urgent"]);
+        assert_eq!(o.headings[0].title, "fix bug");
+        assert!(outline("* plain title\n").headings[0].tags.is_empty());
+    }
+
+    #[test]
+    fn tag_run_must_be_whole_valid_and_trailing() {
+        assert!(outline("* a :not a tag:\n").headings[0].tags.is_empty()); // space inside
+        assert!(outline("* a :b: c\n").headings[0].tags.is_empty()); // not trailing
+        assert_eq!(
+            outline("* x :a_1:@b:#c:%d:\n").headings[0].tags,
+            vec!["a_1", "@b", "#c", "%d"]
+        );
+    }
+
+    #[test]
+    fn markdown_headlines_share_the_metadata_chain() {
+        let o = md_outline("## DONE [#C] ship :rel:\n");
+        let h = &o.headings[0];
+        assert_eq!(h.todo, Some(TodoState::Done));
+        assert_eq!(h.priority, Some('C'));
+        assert_eq!(h.title, "ship");
+        assert_eq!(h.tags, vec!["rel"]);
     }
 
     // ---- Format detection -----------------------------------------------------
