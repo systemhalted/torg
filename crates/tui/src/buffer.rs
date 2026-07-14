@@ -8,9 +8,9 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use textr_org_core::document::Document;
-use textr_org_core::structure::{detect_format, Format, Outline, StructureProvider};
-use textr_org_core::view::View;
+use torg_core::document::Document;
+use torg_core::structure::{detect_format, Format, Outline, StructureProvider};
+use torg_core::view::View;
 
 /// A single open file: the document plus all of its per-buffer editor state. Switching
 /// buffers swaps the whole `Buffer`, so cursor, folds, and scroll survive a round trip.

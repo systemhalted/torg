@@ -68,7 +68,7 @@ fn markdown_headlines_share_the_metadata_chain() {
 
 - [ ] **Step 1.2: Run and verify RED**
 
-Run: `cargo test -p textr-org-core 2>&1 | grep -E "^error|FAILED"`
+Run: `cargo test -p torg-core 2>&1 | grep -E "^error|FAILED"`
 Expected: compile error — no field `priority` on `Heading`.
 
 - [ ] **Step 1.3: Implement.** Add fields to `Heading`:
@@ -202,7 +202,7 @@ fn providers_expose_marker_and_max_level() {
 }
 ```
 
-- [ ] **Step 2.2: Verify RED** — `cargo test -p textr-org-core` → compile error, no method `marker`.
+- [ ] **Step 2.2: Verify RED** — `cargo test -p torg-core` → compile error, no method `marker`.
 
 - [ ] **Step 2.3: Implement.** Extend the trait (above the navigation section):
 

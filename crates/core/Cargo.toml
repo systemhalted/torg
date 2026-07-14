@@ -1,5 +1,5 @@
 [package]
-name = "textr-org-core"
+name = "torg-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

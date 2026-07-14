@@ -1,7 +1,7 @@
 # Installing torg
 
 `torg` ships as a prebuilt binary for macOS (Apple Silicon and Intel) and Linux (x86-64 and
-ARM64), attached to each [GitHub release](https://github.com/systemhalted/textr-org/releases).
+ARM64), attached to each [GitHub release](https://github.com/systemhalted/torg/releases).
 Pick whichever route fits your platform.
 
 ## macOS — Homebrew (recommended)
@@ -22,11 +22,11 @@ Download the `.deb` for your architecture from the latest release and install it
 
 ```sh
 # x86-64
-curl -LO https://github.com/systemhalted/textr-org/releases/latest/download/torg-x86_64-unknown-linux-gnu.deb
+curl -LO https://github.com/systemhalted/torg/releases/latest/download/torg-x86_64-unknown-linux-gnu.deb
 sudo apt install ./torg-x86_64-unknown-linux-gnu.deb
 
 # ARM64 (e.g. Raspberry Pi, Ampere, Graviton)
-curl -LO https://github.com/systemhalted/textr-org/releases/latest/download/torg-aarch64-unknown-linux-gnu.deb
+curl -LO https://github.com/systemhalted/torg/releases/latest/download/torg-aarch64-unknown-linux-gnu.deb
 sudo apt install ./torg-aarch64-unknown-linux-gnu.deb
 ```
 
@@ -40,7 +40,7 @@ Each release has a `torg-<version>-<target>.tar.gz` (plus a `.sha256` to verify 
 
 ```sh
 # example: Apple Silicon Mac, release v0.1.0
-curl -LO https://github.com/systemhalted/textr-org/releases/download/v0.1.0/torg-v0.1.0-aarch64-apple-darwin.tar.gz
+curl -LO https://github.com/systemhalted/torg/releases/download/v0.1.0/torg-v0.1.0-aarch64-apple-darwin.tar.gz
 shasum -a 256 -c torg-v0.1.0-aarch64-apple-darwin.tar.gz.sha256   # optional, after downloading the .sha256
 tar xzf torg-v0.1.0-aarch64-apple-darwin.tar.gz
 sudo mv torg /usr/local/bin/
@@ -67,8 +67,8 @@ Gatekeeper.
 With a Rust toolchain (1.96+):
 
 ```sh
-git clone https://github.com/systemhalted/textr-org
-cd textr-org
+git clone https://github.com/systemhalted/torg
+cd torg
 cargo install --path crates/tui   # installs `torg` into ~/.cargo/bin
 ```
 

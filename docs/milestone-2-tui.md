@@ -40,7 +40,7 @@ through a pty). Rustdoc, `docs/usage.md`, and `docs/tutorial.md` landed with the
 
 `textr` is a from-scratch gedit clone in Rust, built to learn the language while mirroring
 gedit's architecture: a headless, UI-agnostic core with thin frontends on top. Today only
-`textr-org-core` exists (a `Document` over a ropey rope with open/save/edit + a `modified`
+`torg-core` exists (a `Document` over a ropey rope with open/save/edit + a `modified`
 flag). There is **no frontend and no binary**, so textr is not yet runnable as an editor.
 
 This milestone delivers the first runnable program: a terminal UI that opens a file, lets
@@ -62,11 +62,11 @@ Decisions confirmed with the user:
 
 Layers, each pushing logic down so the untested surface is tiny:
 
-1. **`textr-org-core::view::View`** — headless cursor model: position, goal column, and all
+1. **`torg-core::view::View`** — headless cursor model: position, goal column, and all
    editing intent (move / insert / newline / backspace / delete). Pure, no terminal,
    fully unit-tested. Does **not** own the `Document`; methods take `&Document` /
    `&mut Document` (the `App` owns both). gedit analog: the view references the buffer.
-2. **`textr-org-core::structure`** — the format-agnostic outline layer: parses a buffer into an
+2. **`torg-core::structure`** — the format-agnostic outline layer: parses a buffer into an
    `Outline` of `Heading`s (level, title, TODO state, subtree extent) behind a
    `StructureProvider` trait, with `OrgProvider` as the first implementer. Pure, headless,
    fully unit-tested. This is the spine of the [north star](roadmap.md) — folding now;
@@ -114,9 +114,9 @@ Modified files:
   ratatui 0.29 re-exports so there is one crossterm in the tree). `core`'s manifest is
   **untouched** — it never sees ratatui/crossterm.
 
-`crates/tui/Cargo.toml`: package `textr-org-tui`, inheriting workspace version/edition/license;
-`[[bin]] name = "textr"`; deps `textr-org-core = { path = "../core" }`, `ratatui.workspace`,
-`crossterm.workspace`. Run as `cargo run -p textr-org-tui -- <file>`; ships as `textr <file>`.
+`crates/tui/Cargo.toml`: package `torg-tui`, inheriting workspace version/edition/license;
+`[[bin]] name = "textr"`; deps `torg-core = { path = "../core" }`, `ratatui.workspace`,
+`crossterm.workspace`. Run as `cargo run -p torg-tui -- <file>`; ships as `torg <file>`.
 
 ## Document accessors (add to `document.rs`, test-first, before `view.rs`)
 
@@ -377,8 +377,8 @@ cargo doc --no-deps                     # public items documented; builds clean
 
 Manual:
 ```sh
-cargo run -p textr-org-tui -- /tmp/notes.org   # existing file, or empty buffer if missing
-cargo run -p textr-org-tui                      # untitled buffer
+cargo run -p torg-tui -- /tmp/notes.org   # existing file, or empty buffer if missing
+cargo run -p torg-tui                      # untitled buffer
 ```
 Acceptance checklist — base editor:
 - File contents shown; cursor top-left; status `notes.org — 1:1`.

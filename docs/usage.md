@@ -1,4 +1,4 @@
-# textr-org usage
+# torg usage
 
 A terminal text editor with a first cut of Org-mode–style structure editing. Opens, edits, and
 saves multiple buffers, and understands Org `*` headings and Markdown `#` headings (folding,
@@ -7,8 +7,8 @@ navigation, TODO cycling).
 ## Running it
 
 ```sh
-cargo run -p textr-org-tui -- <file>...   # open one or more files
-cargo run -p textr-org-tui                # start with an untitled buffer
+cargo run -p torg-tui -- <file>...   # open one or more files
+cargo run -p torg-tui                # start with an untitled buffer
 ```
 
 Installed (e.g. `cargo install --path crates/tui`), the binary is `torg`:

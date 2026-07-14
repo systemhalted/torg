@@ -7,7 +7,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
-use textr_org_core::timestamp::find_timestamps;
+use torg_core::timestamp::find_timestamps;
 
 use crate::app::{App, DatePurpose, Mode};
 
@@ -252,7 +252,7 @@ fn status_text(app: &App) -> String {
 mod tests {
     use super::*;
     use crate::buffer::Buffer;
-    use textr_org_core::document::Document;
+    use torg_core::document::Document;
 
     #[test]
     fn expand_tabs_advances_to_the_next_tab_stop() {

@@ -1,19 +1,19 @@
-# textr-org
+# torg
 
-An Org-mode–flavored terminal text editor in Rust — the structure-editing **sibling** of
-[`textr`](../textr), a from-scratch [gedit](https://gedit-text-editor.org/) clone. Where
-`textr` stays a minimal gedit-style editor, `textr-org` treats Org-mode–class structure
-editing (outline, folding, `TODO`/`DONE` cycling) as a first-class part of the editor.
+An Org-mode–flavored terminal text editor in Rust. `torg` treats Org-mode–class structure
+editing (outline, folding, `TODO`/`DONE` cycling) as a first-class part of the editor, rather
+than a plugin bolted onto a plain text buffer.
 
-It keeps gedit's architecture — a headless, UI-agnostic core with thin frontends — and shares
-`textr`'s rope-buffer core. It began as an Ultraplan-generated implementation of `textr`'s
-Milestone 2 and was split into its own project so that work could live and run independently.
-The binary is `torg`. (In `textr` proper, this Org functionality is instead planned to return
-later as an installable *package* over a stable core API.)
+It keeps gedit's architecture — a headless, UI-agnostic core with thin frontends. `torg` is
+the structure-editing **sibling** of [`textr`](../textr), a from-scratch
+[gedit](https://gedit-text-editor.org/) clone, and shares `textr`'s rope-buffer core; it began
+as `textr`'s Milestone 2 and was split into its own project so the two could evolve
+independently. (In `textr` proper, this Org functionality is instead planned to return later
+as an installable *package* over a stable core API.)
 
 ## Status
 
-**Runnable.** `textr-org` is a terminal editor that opens, edits, and saves multiple buffers —
+**Runnable.** `torg` is a terminal editor that opens, edits, and saves multiple buffers —
 several files in one session, switched without quitting — and it understands both Org `*`
 headings and Markdown `#` headings: folding, navigation, `TODO`/`DONE` cycling, structural
 editing (promote/demote, move, priorities, tags), and Org timestamps with scheduling. This is
@@ -22,13 +22,13 @@ Milestones 2 and 3 complete, plus the multi-file machinery from M5 and the first
 [`docs/roadmap.md`](docs/roadmap.md).
 
 ```sh
-cargo run -p textr-org-tui -- notes.org
+cargo run -p torg-tui -- notes.org
 ```
 
 ## Install
 
 Prebuilt binaries ship for macOS (Apple Silicon + Intel) and Linux (x86-64 + ARM64) on every
-[release](https://github.com/systemhalted/textr-org/releases):
+[release](https://github.com/systemhalted/torg/releases):
 
 ```sh
 brew install systemhalted/tap/torg                 # macOS (Homebrew)
@@ -42,7 +42,7 @@ unsigned binaries — are in [`docs/install.md`](docs/install.md). Cutting a rel
 
 ## What works today
 
-**The terminal editor (`textr-org-tui`)** — see [`docs/usage.md`](docs/usage.md) for the full key
+**The terminal editor (`torg-tui`)** — see [`docs/usage.md`](docs/usage.md) for the full key
 list:
 
 - open a file (or start untitled / create-on-save), move with arrows / Home / End / PageUp /
@@ -63,7 +63,7 @@ list:
   heading's `SCHEDULED`/`DEADLINE` (`Alt+S`/`Alt+D`), insert a timestamp (`Alt+.`/`Alt+i`),
   and shift the field under the cursor with `Shift+↑/↓`; timestamps are highlighted
 
-**The headless core (`textr-org-core`)** — a `Document` on a [`ropey`](https://crates.io/crates/ropey)
+**The headless core (`torg-core`)** — a `Document` on a [`ropey`](https://crates.io/crates/ropey)
 rope (load/save/*Save As* with typed errors, char-indexed edits, a modified flag), a `View`
 (cursor + editing, goal column), a format-agnostic `structure` layer (outline, fold
 extents, TODO cycling, structural edits) behind a `StructureProvider` trait with Org and
@@ -82,7 +82,7 @@ separation *inside* the frontend (rendering vs the raw terminal driver) — is i
 [`docs/architecture.md`](docs/architecture.md).
 
 ```
-textr-org/
+torg/
 ├── crates/
 │   ├── core/        # UI-agnostic heart: Document, View, structure (Org + Markdown).
 │   │                #   Tab, Window, commands planned. gedit's model layer, minus GTK.
@@ -99,7 +99,7 @@ Requires a recent stable Rust toolchain (1.96+).
 cargo build
 cargo test                                    # ~200 unit tests
 cargo clippy --all-targets -- -D warnings
-cargo run -p textr-org-tui -- notes.org           # launch the editor
+cargo run -p torg-tui -- notes.org           # launch the editor
 ```
 
 ## Roadmap
