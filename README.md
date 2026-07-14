@@ -25,6 +25,21 @@ Milestones 2 and 3 complete, plus the multi-file machinery from M5 and the first
 cargo run -p textr-org-tui -- notes.org
 ```
 
+## Install
+
+Prebuilt binaries ship for macOS (Apple Silicon + Intel) and Linux (x86-64 + ARM64) on every
+[release](https://github.com/systemhalted/textr-org/releases):
+
+```sh
+brew install systemhalted/tap/torg                 # macOS (Homebrew)
+sudo apt install ./torg-x86_64-unknown-linux-gnu.deb  # Debian/Ubuntu (.deb from the release)
+cargo install --path crates/tui                    # from source (Rust 1.96+)
+```
+
+Full instructions — direct downloads, ARM64, and the one-time macOS Gatekeeper step for
+unsigned binaries — are in [`docs/install.md`](docs/install.md). Cutting a release is
+[`docs/releasing.md`](docs/releasing.md).
+
 ## What works today
 
 **The terminal editor (`textr-org-tui`)** — see [`docs/usage.md`](docs/usage.md) for the full key

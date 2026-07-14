@@ -3,6 +3,10 @@ name = "textr-org-tui"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+description = "torg — an Org-mode–flavored terminal text editor (outline, folding, TODO, structural editing, timestamps)."
+homepage = "https://github.com/systemhalted/textr-org"
+readme = "../../README.md"
 
 # The terminal frontend. Depends on the headless core plus the terminal stack;
 # the core crate must never depend back on this. (gedit analog: the GTK frontend.)
@@ -14,3 +18,19 @@ path = "src/main.rs"
 textr-org-core = { path = "../core" }
 ratatui.workspace = true
 crossterm.workspace = true
+
+# Debian packaging (cargo-deb). The binary is installed to /usr/bin/torg.
+[package.metadata.deb]
+name = "torg"
+maintainer = "systemhalted <palakmathur@gmail.com>"
+section = "editors"
+priority = "optional"
+extended-description = """\
+torg is a terminal text editor with Org-mode–style structure editing: outline folding, \
+heading navigation, TODO cycling, promote/demote and subtree moves, priorities, tags, and \
+Org timestamps with SCHEDULED/DEADLINE. It also reads Markdown (# ATX) headings."""
+assets = [
+    ["target/release/torg", "usr/bin/", "755"],
+    ["../../README.md", "usr/share/doc/torg/README.md", "644"],
+    ["../../docs/usage.md", "usr/share/doc/torg/usage.md", "644"],
+]

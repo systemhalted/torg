@@ -9,7 +9,7 @@ members = [
 version = "0.1.0"
 edition = "2021"
 license = "GPL-2.0-or-later"
-repository = ""
+repository = "https://github.com/systemhalted/textr-org"
 
 # Shared dependency versions live here so every crate pins the same release.
 # (gedit analog: the top-level meson.build that declares versions once.)

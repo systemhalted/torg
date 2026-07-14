@@ -1,0 +1,29 @@
+# Rendered by .github/workflows/release.yml from the released macOS tarballs.
+# The @…@ placeholders are filled with the version, tag, repo, and per-arch sha256.
+class Torg < Formula
+  desc "Org-mode–flavored terminal text editor"
+  homepage "https://github.com/@REPO@"
+  version "@VERSION@"
+  license "GPL-2.0-or-later"
+
+  on_macos do
+    on_arm do
+      url "https://github.com/@REPO@/releases/download/@TAG@/torg-@TAG@-aarch64-apple-darwin.tar.gz"
+      sha256 "@SHA_ARM@"
+    end
+    on_intel do
+      url "https://github.com/@REPO@/releases/download/@TAG@/torg-@TAG@-x86_64-apple-darwin.tar.gz"
+      sha256 "@SHA_INTEL@"
+    end
+  end
+
+  def install
+    bin.install "torg"
+  end
+
+  test do
+    # torg is a full-screen TUI, so we only assert the binary landed on PATH
+    # rather than launching it (which would need a terminal).
+    assert_predicate bin/"torg", :exist?
+  end
+end
