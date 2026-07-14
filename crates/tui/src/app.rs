@@ -9,13 +9,13 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use textr_org_core::document::Document;
-use textr_org_core::structure::{
+use torg_core::document::Document;
+use torg_core::structure::{
     detect_format, is_valid_tag, next_heading, prev_heading, shift_timestamp, EditOutcome, Format,
     Outline, Planning, StructureProvider,
 };
-use textr_org_core::timestamp::{parse_timestamp, Timestamp};
-use textr_org_core::view::View;
+use torg_core::timestamp::{parse_timestamp, Timestamp};
+use torg_core::view::View;
 
 use crate::action::{key_to_action, Action};
 use crate::buffer::Buffer;

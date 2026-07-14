@@ -1,11 +1,11 @@
 [package]
-name = "textr-org-tui"
+name = "torg-tui"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "torg — an Org-mode–flavored terminal text editor (outline, folding, TODO, structural editing, timestamps)."
-homepage = "https://github.com/systemhalted/textr-org"
+homepage = "https://github.com/systemhalted/torg"
 readme = "../../README.md"
 
 # The terminal frontend. Depends on the headless core plus the terminal stack;
@@ -15,7 +15,7 @@ name = "torg"
 path = "src/main.rs"
 
 [dependencies]
-textr-org-core = { path = "../core" }
+torg-core = { path = "../core" }
 ratatui.workspace = true
 crossterm.workspace = true
 

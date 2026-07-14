@@ -2,7 +2,7 @@
 //!
 //! Thin lifecycle glue: parse the file argument into an initial [`Document`], then hand off to
 //! the terminal driver. All editor behaviour lives in the (tested) [`app`] state tier and in
-//! `textr-org-core`; this file only wires them to a real terminal.
+//! `torg-core`; this file only wires them to a real terminal.
 
 mod action;
 mod app;
@@ -14,7 +14,7 @@ mod viewport;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use textr_org_core::document::Document;
+use torg_core::document::Document;
 
 use crate::app::App;
 use crate::buffer::Buffer;

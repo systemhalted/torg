@@ -451,23 +451,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "textr-org-core"
-version = "0.2.0"
-dependencies = [
- "ropey",
- "thiserror",
-]
-
-[[package]]
-name = "textr-org-tui"
-version = "0.2.0"
-dependencies = [
- "crossterm",
- "ratatui",
- "textr-org-core",
-]
-
-[[package]]
 name = "thiserror"
 version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -485,6 +468,23 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "torg-core"
+version = "0.2.0"
+dependencies = [
+ "ropey",
+ "thiserror",
+]
+
+[[package]]
+name = "torg-tui"
+version = "0.2.0"
+dependencies = [
+ "crossterm",
+ "ratatui",
+ "torg-core",
 ]
 
 [[package]]

@@ -3,7 +3,7 @@ name: verify
 description: Drive the torg TUI end-to-end in an isolated tmux session to verify editor changes at the real terminal surface.
 ---
 
-# Verifying torg (textr-org-tui)
+# Verifying torg (torg-tui)
 
 The surface is a full-screen TUI; unit tests cover the state tier, so verification means
 driving the real binary and capturing panes.

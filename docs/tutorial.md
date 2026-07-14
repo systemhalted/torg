@@ -1,4 +1,4 @@
-# textr-org tutorial — Rust concepts, learned by building Milestone 2
+# torg tutorial — Rust concepts, learned by building Milestone 2
 
 Notes on the Rust ideas that showed up while building the M2 editor (the headless `View` and
 `structure` layer in `crates/core`, and the terminal frontend in `crates/tui`). Each section
@@ -20,7 +20,7 @@ declared once in the root `[workspace.dependencies]` and pulled in **only** by
 ```toml
 # crates/tui/Cargo.toml
 [dependencies]
-textr-org-core = { path = "../core" }   # tui -> core
+torg-core = { path = "../core" }   # tui -> core
 ratatui.workspace = true            # terminal stack, tui only
 crossterm.workspace = true
 ```

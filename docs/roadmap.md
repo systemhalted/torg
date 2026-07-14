@@ -1,4 +1,4 @@
-# textr-org roadmap
+# torg roadmap
 
 > The long view. Individual milestones get their own living design doc (e.g.
 > [`milestone-2-tui.md`](milestone-2-tui.md)); this file is the map they sit on and the
@@ -138,7 +138,7 @@ many files to a target; tables import/export CSV. Because export reads the same
 ### M10 — Extensibility & advanced views
 The open-ended tier: custom link types (`issue:74`-style, with user-defined resolution),
 column view over properties, LaTeX fragment display, speed keys, and the package/extension
-API over a stable core — the point where `textr-org`'s capabilities are meant to become
+API over a stable core — the point where `torg`'s capabilities are meant to become
 installable packages (see the `textr` sibling project's plan).
 
 ### M11 — GUI
