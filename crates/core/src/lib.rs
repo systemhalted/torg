@@ -5,4 +5,5 @@
 
 pub mod document;
 pub mod structure;
+pub mod timestamp;
 pub mod view;
