@@ -333,6 +333,198 @@ fn parse_count_unit(s: &str) -> Option<(u32, Unit)> {
     Some((n, unit))
 }
 
+// ---- shifting a field under the cursor --------------------------------------
+
+/// A shiftable field of a stamp. The weekday is not a field — a cursor there shifts the day.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Field {
+    Year,
+    Month,
+    Day,
+    Hour,
+    Minute,
+    EndHour,
+    EndMinute,
+    RepeaterN,
+    WarningN,
+}
+
+/// Which field the char offset `rel` (into the whole `<…>`/`[…]` text) sits in, if any.
+/// Timestamps are ASCII, so char offsets equal byte offsets.
+pub fn field_at(tsraw: &str, rel: usize) -> Option<Field> {
+    let bytes = tsraw.as_bytes();
+    if rel >= bytes.len() {
+        return None;
+    }
+    // The date runs from index 1 to the first space (or the closing bracket).
+    let date_end = tsraw[1..]
+        .find([' ', '>', ']'])
+        .map(|i| i + 1)
+        .unwrap_or(bytes.len());
+    // Date groups: year-month-day separated by '-'.
+    let date = &tsraw[1..date_end];
+    let mut dashes = date.match_indices('-').map(|(i, _)| i + 1);
+    let d1 = dashes.next();
+    let d2 = dashes.next();
+    if let (Some(m0), Some(d0)) = (d1, d2) {
+        if (1..1 + m0).contains(&rel) {
+            return Some(Field::Year);
+        }
+        if (1 + m0..1 + d0).contains(&rel) {
+            return Some(Field::Month);
+        }
+        if (1 + d0..date_end).contains(&rel) {
+            return Some(Field::Day);
+        }
+    }
+    // Tokens after the date, each at a known absolute offset.
+    let mut o = date_end;
+    for token in tsraw[date_end..bytes.len() - 1].split_inclusive(' ') {
+        let start = o;
+        o += token.len();
+        let tok = token.trim_end_matches(' ');
+        if tok.is_empty() {
+            continue;
+        }
+        if !(start..o).contains(&rel) {
+            continue;
+        }
+        let first = tok.as_bytes()[0];
+        if tok.bytes().all(|b| b.is_ascii_alphabetic()) {
+            return Some(Field::Day); // the weekday word
+        }
+        if tok.contains(':') {
+            let rel_in = rel - start;
+            let (a, b) = match tok.split_once('-') {
+                Some((a, b)) => (a, Some(b)),
+                None => (tok, None),
+            };
+            if rel_in <= a.len() {
+                // "HH:MM": before the colon is the hour, after is the minute.
+                let colon = a.find(':').unwrap_or(a.len());
+                return Some(if rel_in <= colon { Field::Hour } else { Field::Minute });
+            } else if b.is_some() {
+                let end_start = a.len() + 1;
+                let end = b.unwrap();
+                let colon = end.find(':').map(|c| c + end_start).unwrap_or(o);
+                return Some(if rel_in <= colon { Field::EndHour } else { Field::EndMinute });
+            }
+        }
+        if matches!(first, b'+' | b'.') {
+            return Some(Field::RepeaterN);
+        }
+        if first == b'-' {
+            return Some(Field::WarningN);
+        }
+    }
+    None
+}
+
+/// Shift one `field` of `stamp` by one step up or down, with Org's rollover/clamp rules:
+/// month and year clamp the day to the month length; day, hour, and minute carry.
+pub fn shift_field(stamp: Stamp, field: Field, up: bool) -> Stamp {
+    let d: i64 = if up { 1 } else { -1 };
+    let mut s = stamp;
+    match field {
+        Field::Year => {
+            s.date.year += d as i32;
+            clamp_day(&mut s.date);
+        }
+        Field::Month => {
+            let mut m = s.date.month as i64 - 1 + d;
+            while m < 0 {
+                m += 12;
+                s.date.year -= 1;
+            }
+            while m > 11 {
+                m -= 12;
+                s.date.year += 1;
+            }
+            s.date.month = (m + 1) as u8;
+            clamp_day(&mut s.date);
+        }
+        Field::Day => s.date = add_days(s.date, d),
+        Field::Hour => shift_time(&mut s, false, d * 60),
+        Field::Minute => shift_time(&mut s, false, d),
+        Field::EndHour => shift_time(&mut s, true, d * 60),
+        Field::EndMinute => shift_time(&mut s, true, d),
+        Field::RepeaterN => {
+            if let Some(r) = &mut s.repeater {
+                r.n = (r.n as i64 + d).max(1) as u32;
+            }
+        }
+        Field::WarningN => {
+            if let Some(w) = &mut s.warning {
+                w.n = (w.n as i64 + d).max(1) as u32;
+            }
+        }
+    }
+    s
+}
+
+fn clamp_day(date: &mut Date) {
+    let max = days_in_month(date.year, date.month);
+    if date.day > max {
+        date.day = max;
+    }
+}
+
+/// Add `delta` minutes to a stamp's `time` (or `time_end` when `end`), carrying into the date.
+fn shift_time(stamp: &mut Stamp, end: bool, delta: i64) {
+    let slot = if end { stamp.time_end } else { stamp.time };
+    let Some(t) = slot else { return };
+    let mut total = t.hour as i64 * 60 + t.min as i64 + delta;
+    while total < 0 {
+        total += 24 * 60;
+        stamp.date = add_days(stamp.date, -1);
+    }
+    while total >= 24 * 60 {
+        total -= 24 * 60;
+        stamp.date = add_days(stamp.date, 1);
+    }
+    let new = Time {
+        hour: (total / 60) as u8,
+        min: (total % 60) as u8,
+    };
+    if end {
+        stamp.time_end = Some(new);
+    } else {
+        stamp.time = Some(new);
+    }
+}
+
+/// Add `delta` days to a date (proleptic Gregorian, via day ordinals).
+fn add_days(date: Date, delta: i64) -> Date {
+    civil_from_days(days_from_civil(date) + delta)
+}
+
+fn days_from_civil(date: Date) -> i64 {
+    let y = date.year as i64 - (date.month <= 2) as i64;
+    let era = (if y >= 0 { y } else { y - 399 }) / 400;
+    let yoe = y - era * 400;
+    let m = date.month as i64;
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + date.day as i64 - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146097 + doe - 719468
+}
+
+fn civil_from_days(z: i64) -> Date {
+    let z = z + 719468;
+    let era = (if z >= 0 { z } else { z - 146096 }) / 146097;
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    Date {
+        year: (y + (month <= 2) as i64) as i32,
+        month: month as u8,
+        day: day as u8,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

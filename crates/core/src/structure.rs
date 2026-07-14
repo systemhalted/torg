@@ -12,6 +12,7 @@
 use std::path::Path;
 
 use crate::document::Document;
+use crate::timestamp::{field_at, find_timestamps, parse_timestamp, shift_field, Timestamp};
 
 /// A TODO workflow keyword on a heading. M2 ships the two canonical states; custom keyword
 /// sets, priorities, and tags come later.
@@ -39,6 +40,10 @@ pub struct Heading {
     pub priority: Option<char>,
     /// The `:tag:` run at the end of the headline, colons stripped.
     pub tags: Vec<String>,
+    /// A `SCHEDULED:` timestamp from the planning line below the heading (Org only).
+    pub scheduled: Option<Timestamp>,
+    /// A `DEADLINE:` timestamp from the planning line below the heading (Org only).
+    pub deadline: Option<Timestamp>,
     /// The last line of this heading's subtree. The foldable body is the (possibly empty)
     /// range `line + 1 ..= last_line`.
     pub last_line: usize,
@@ -67,6 +72,13 @@ pub enum EditOutcome {
 }
 
 const NOT_ON_HEADING: &str = "Not inside a heading's subtree";
+
+/// Which planning keyword an edit targets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Planning {
+    Scheduled,
+    Deadline,
+}
 
 /// The heading whose subtree contains `line`: the nearest heading at or above it.
 fn enclosing(outline: &Outline, line: usize) -> Option<&Heading> {
@@ -318,11 +330,90 @@ pub trait StructureProvider {
         doc.insert(start, &new_line);
         EditOutcome::Changed { cursor_line: line }
     }
+
+    /// Set, replace, or remove (`ts = None`) the enclosing heading's `SCHEDULED`/`DEADLINE`
+    /// timestamp on the planning line directly below it. `SCHEDULED` is written before
+    /// `DEADLINE`; an empty planning line is removed entirely.
+    fn set_planning(
+        &self,
+        doc: &mut Document,
+        line: usize,
+        which: Planning,
+        ts: Option<Timestamp>,
+    ) -> EditOutcome {
+        let outline = self.parse(doc);
+        let Some(h) = enclosing(&outline, line) else {
+            return EditOutcome::NoOp(NOT_ON_HEADING);
+        };
+        let (hline, level) = (h.line, h.level);
+        let below = doc.line_text(hline + 1);
+        let below_trim = below.trim_start();
+        let is_planning =
+            below_trim.starts_with("SCHEDULED:") || below_trim.starts_with("DEADLINE:");
+        let (mut scheduled, mut deadline) = if is_planning {
+            parse_planning(&below)
+        } else {
+            (None, None)
+        };
+        match which {
+            Planning::Scheduled => scheduled = ts,
+            Planning::Deadline => deadline = ts,
+        }
+        let mut parts: Vec<String> = Vec::new();
+        if let Some(s) = scheduled {
+            parts.push(format!("SCHEDULED: {s}"));
+        }
+        if let Some(d) = deadline {
+            parts.push(format!("DEADLINE: {d}"));
+        }
+        let start = doc.line_to_char(hline + 1);
+        if is_planning {
+            doc.remove(start..start + below.chars().count());
+        }
+        if !parts.is_empty() {
+            let indent = " ".repeat(level + 1);
+            doc.insert(start, &format!("{indent}{}\n", parts.join(" ")));
+        }
+        EditOutcome::Changed { cursor_line: line }
+    }
 }
 
 /// Whether `tag` is a legal tag name (non-empty, only letters/digits/`_@#%`).
 pub fn is_valid_tag(tag: &str) -> bool {
     !tag.is_empty() && tag.chars().all(is_tag_char)
+}
+
+/// Shift the timestamp field under the cursor (`line`, char column `col`) by one step,
+/// rewriting it in place. Returns `None` when the cursor is not inside a timestamp, so the
+/// caller can fall through to another meaning of the key (e.g. priority cycling). Timestamps
+/// are ASCII, so char columns index them directly.
+pub fn shift_timestamp(
+    doc: &mut Document,
+    line: usize,
+    col: usize,
+    up: bool,
+) -> Option<EditOutcome> {
+    let raw = doc.line_text(line);
+    let text = raw.strip_suffix('\n').unwrap_or(&raw);
+    let (start, end) = find_timestamps(text)
+        .into_iter()
+        .find(|&(s, e)| col >= s && col < e)?;
+    let tsraw = &text[start..end];
+    let field = field_at(tsraw, col - start)?;
+    // A range's second stamp: shift it instead when the cursor is past the `--`.
+    let (ts, _) = parse_timestamp(tsraw)?;
+    let sep = tsraw.find("--");
+    let in_end = matches!(sep, Some(i) if col - start > i);
+    let new_ts = if in_end {
+        let end_stamp = shift_field(ts.end?, field, up);
+        Timestamp { start: ts.start, end: Some(end_stamp) }
+    } else {
+        Timestamp { start: shift_field(ts.start, field, up), end: ts.end }
+    };
+    let base = doc.line_to_char(line);
+    doc.remove(base + start..base + end);
+    doc.insert(base + start, &new_ts.to_string());
+    Some(EditOutcome::Changed { cursor_line: line })
 }
 
 // ---- navigation (pure free functions over an Outline) ---------------------
@@ -366,6 +457,12 @@ impl StructureProvider for OrgProvider {
             .filter_map(|line| parse_org_heading(&doc.line_text(line), line))
             .collect();
         fill_subtree_extents(&mut headings, last_content_line(doc));
+        // The planning line, if any, sits directly below the heading.
+        for h in &mut headings {
+            let (scheduled, deadline) = parse_planning(&doc.line_text(h.line + 1));
+            h.scheduled = scheduled;
+            h.deadline = deadline;
+        }
         Outline { headings }
     }
 
@@ -461,8 +558,32 @@ fn parse_org_heading(raw: &str, line: usize) -> Option<Heading> {
         todo,
         priority,
         tags,
+        scheduled: None,
+        deadline: None,
         last_line: line,
     })
+}
+
+/// Parse a planning line (`SCHEDULED: <…>  DEADLINE: <…>`, either or both, any order, any
+/// leading whitespace) into its two timestamps. Returns `(None, None)` if `text` is not a
+/// planning line.
+fn parse_planning(text: &str) -> (Option<Timestamp>, Option<Timestamp>) {
+    let trimmed = text.trim_start();
+    let mut scheduled = None;
+    let mut deadline = None;
+    for token in ["SCHEDULED:", "DEADLINE:"] {
+        if let Some(pos) = trimmed.find(token) {
+            let after = trimmed[pos + token.len()..].trim_start();
+            if let Some((ts, _)) = parse_timestamp(after) {
+                if token == "SCHEDULED:" {
+                    scheduled = Some(ts);
+                } else {
+                    deadline = Some(ts);
+                }
+            }
+        }
+    }
+    (scheduled, deadline)
 }
 
 // ---- format detection --------------------------------------------------------
@@ -637,6 +758,8 @@ fn parse_md_heading(raw: &str, line: usize) -> Option<Heading> {
         todo,
         priority,
         tags,
+        scheduled: None,
+        deadline: None,
         last_line: line,
     })
 }
@@ -1010,6 +1133,146 @@ mod tests {
         assert_eq!(h.priority, Some('C'));
         assert_eq!(h.title, "ship");
         assert_eq!(h.tags, vec!["rel"]);
+    }
+
+    // ---- planning lines ---------------------------------------------------------
+
+    #[test]
+    fn parses_a_scheduled_planning_line_below_the_heading() {
+        let o = outline("* Task\nSCHEDULED: <2024-01-15 Mon>\nbody\n");
+        let h = &o.headings[0];
+        assert_eq!(h.scheduled.map(|t| t.to_string()), Some("<2024-01-15 Mon>".to_string()));
+        assert!(h.deadline.is_none());
+    }
+
+    #[test]
+    fn parses_scheduled_and_deadline_on_one_indented_line_either_order() {
+        let o = outline("* T\n  DEADLINE: <2024-02-01> SCHEDULED: <2024-01-15>\n");
+        let h = &o.headings[0];
+        assert_eq!(h.scheduled.map(|t| t.to_string()), Some("<2024-01-15 Mon>".to_string()));
+        assert_eq!(h.deadline.map(|t| t.to_string()), Some("<2024-02-01 Thu>".to_string()));
+    }
+
+    #[test]
+    fn a_heading_with_no_planning_line_has_none() {
+        let o = outline("* Task\njust body\n");
+        assert!(o.headings[0].scheduled.is_none());
+        assert!(o.headings[0].deadline.is_none());
+    }
+
+    #[test]
+    fn markdown_headings_never_carry_planning() {
+        let o = md_outline("# Task\nSCHEDULED: <2024-01-15>\n");
+        assert!(o.headings[0].scheduled.is_none());
+        assert!(o.headings[0].deadline.is_none());
+    }
+
+    // ---- date shifting under the cursor -----------------------------------------
+
+    /// Shift the timestamp at `col` on line 0 of a one-line doc and return the new text.
+    fn shifted(text: &str, col: usize, up: bool) -> Option<String> {
+        let mut doc = Document::from_text(text);
+        shift_timestamp(&mut doc, 0, col, up).map(|_| doc.text())
+    }
+
+    #[test]
+    fn shift_day_up_rolls_over_and_updates_weekday() {
+        // "<2024-01-31 Wed>": the day digits sit at columns 9-10.
+        assert_eq!(
+            shifted("<2024-01-31 Wed>", 9, true).as_deref(),
+            Some("<2024-02-01 Thu>")
+        );
+    }
+
+    #[test]
+    fn shift_month_up_clamps_the_day() {
+        // Jan 31 + 1 month → Feb 29 in a leap year (month digits at cols 6-7).
+        assert_eq!(
+            shifted("<2024-01-31 Wed>", 6, true).as_deref(),
+            Some("<2024-02-29 Thu>")
+        );
+        // …and Feb 28 in a common year.
+        assert_eq!(
+            shifted("<2023-01-31 Tue>", 6, true).as_deref(),
+            Some("<2023-02-28 Tue>")
+        );
+    }
+
+    #[test]
+    fn shift_year_down_on_feb_29_clamps() {
+        assert_eq!(
+            shifted("<2024-02-29 Thu>", 1, false).as_deref(),
+            Some("<2023-02-28 Tue>")
+        );
+    }
+
+    #[test]
+    fn shift_preserves_inactive_brackets_and_time() {
+        // Minute field of an inactive stamp with a time (col 19 is a minute digit).
+        assert_eq!(
+            shifted("[2024-01-15 Mon 09:59]", 19, true).as_deref(),
+            Some("[2024-01-15 Mon 10:00]") // minute carries into the hour
+        );
+    }
+
+    #[test]
+    fn shift_a_weekday_column_moves_the_day() {
+        // Cursor on the "Mon" weekday shifts the day.
+        assert_eq!(
+            shifted("<2024-01-15 Mon>", 12, true).as_deref(),
+            Some("<2024-01-16 Tue>")
+        );
+    }
+
+    #[test]
+    fn shift_off_a_timestamp_returns_none() {
+        assert!(shifted("no stamp here", 3, true).is_none());
+        assert!(shifted("x <2024-01-15 Mon>", 0, true).is_none()); // before the stamp
+    }
+
+    // ---- set_planning -----------------------------------------------------------
+
+    fn stamp(s: &str) -> Timestamp {
+        parse_timestamp(s).unwrap().0
+    }
+
+    #[test]
+    fn set_planning_inserts_an_indented_line_below_the_heading() {
+        let mut doc = Document::from_text("* Task\nbody\n");
+        OrgProvider.set_planning(&mut doc, 0, Planning::Scheduled, Some(stamp("<2024-01-15>")));
+        assert_eq!(doc.text(), "* Task\n  SCHEDULED: <2024-01-15 Mon>\nbody\n");
+    }
+
+    #[test]
+    fn set_planning_updates_in_place_and_keeps_the_other_keyword() {
+        let mut doc = Document::from_text("* T\n  SCHEDULED: <2024-01-15 Mon>\n");
+        OrgProvider.set_planning(&mut doc, 0, Planning::Deadline, Some(stamp("<2024-02-01>")));
+        assert_eq!(
+            doc.text(),
+            "* T\n  SCHEDULED: <2024-01-15 Mon> DEADLINE: <2024-02-01 Thu>\n"
+        );
+        // Replacing scheduled updates just that stamp.
+        OrgProvider.set_planning(&mut doc, 0, Planning::Scheduled, Some(stamp("<2024-01-20>")));
+        assert_eq!(
+            doc.text(),
+            "* T\n  SCHEDULED: <2024-01-20 Sat> DEADLINE: <2024-02-01 Thu>\n"
+        );
+    }
+
+    #[test]
+    fn set_planning_none_removes_the_keyword_and_the_line_when_empty() {
+        let mut doc = Document::from_text("* T\n  SCHEDULED: <2024-01-15 Mon>\nbody\n");
+        OrgProvider.set_planning(&mut doc, 0, Planning::Scheduled, None);
+        assert_eq!(doc.text(), "* T\nbody\n"); // the whole planning line goes
+    }
+
+    #[test]
+    fn set_planning_off_a_heading_is_a_noop() {
+        let mut doc = Document::from_text("plain\n");
+        assert!(matches!(
+            OrgProvider.set_planning(&mut doc, 0, Planning::Scheduled, Some(stamp("<2024-01-15>"))),
+            EditOutcome::NoOp(_)
+        ));
     }
 
     // ---- structural edits -------------------------------------------------------
