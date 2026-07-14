@@ -472,7 +472,7 @@ dependencies = [
 
 [[package]]
 name = "torg-core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "ropey",
  "thiserror",
@@ -480,7 +480,7 @@ dependencies = [
 
 [[package]]
 name = "torg-tui"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "crossterm",
  "ratatui",
