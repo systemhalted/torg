@@ -40,6 +40,15 @@ Full instructions — direct downloads, ARM64, and the one-time macOS Gatekeeper
 unsigned binaries — are in [`docs/install.md`](docs/install.md). Cutting a release is
 [`docs/releasing.md`](docs/releasing.md).
 
+## Documentation
+
+- **[`docs/guide.md`](docs/guide.md)** — a hands-on tour of every feature with worked examples,
+  in both Org and Markdown. Start here.
+- **[`docs/usage.md`](docs/usage.md)** — the terse one-screen key reference.
+- **[`docs/install.md`](docs/install.md)** — installing on macOS and Linux.
+- **[`docs/roadmap.md`](docs/roadmap.md)** / **[`docs/architecture.md`](docs/architecture.md)** —
+  where torg is headed and how it's built.
+
 ## What works today
 
 **The terminal editor (`torg-tui`)** — see [`docs/usage.md`](docs/usage.md) for the full key

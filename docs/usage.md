@@ -4,6 +4,9 @@ A terminal text editor with a first cut of Org-mode–style structure editing. O
 saves multiple buffers, and understands Org `*` headings and Markdown `#` headings (folding,
 navigation, TODO cycling).
 
+> This page is the **terse reference**. For a hands-on walkthrough of every feature with
+> worked examples in both Org and Markdown, read [`guide.md`](guide.md).
+
 ## Running it
 
 ```sh
@@ -190,9 +193,9 @@ hints here too.
 [2/3] notes.org* — 3:5   Saved
 ```
 
-## Known limitations (Milestone 2)
+## Known limitations
 
-This is the first runnable milestone; several things are deliberately out of scope for now:
+Several things are deliberately still ahead (see [`roadmap.md`](roadmap.md)):
 
 - **No line wrapping** — long lines are clipped at the right edge (no horizontal scroll).
 - **Cursor drift on wide/combining characters** — the cursor is placed by character count, so
