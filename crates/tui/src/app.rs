@@ -63,6 +63,78 @@ enum PromptEvent {
     Submitted(String),
 }
 
+/// The user's home directory, from `$HOME` (or `%USERPROFILE%` on Windows).
+fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+}
+
+/// Expand a path typed into a prompt: a leading `~`/`~/` becomes the home directory and
+/// `$VAR` / `${VAR}` become their environment values (an undefined variable is left verbatim,
+/// so a real `$` in a name is never silently dropped). The shell isn't involved, so this is
+/// deliberately limited to the two expansions a user actually expects.
+fn expand_path(text: &str) -> PathBuf {
+    let expanded = expand_env(text.trim());
+    if expanded == "~" {
+        if let Some(home) = home_dir() {
+            return home;
+        }
+    } else if let Some(rest) = expanded.strip_prefix("~/") {
+        if let Some(home) = home_dir() {
+            return home.join(rest);
+        }
+    }
+    PathBuf::from(expanded)
+}
+
+/// Replace `$VAR` and `${VAR}` with their environment values, leaving unknown variables (and
+/// stray `$` characters) untouched.
+fn expand_env(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.char_indices().peekable();
+    while let Some((_, c)) = chars.next() {
+        if c != '$' {
+            out.push(c);
+            continue;
+        }
+        let braced = matches!(chars.peek(), Some((_, '{')));
+        if braced {
+            chars.next(); // consume '{'
+        }
+        let mut name = String::new();
+        while let Some(&(_, nc)) = chars.peek() {
+            let ok = if braced { nc != '}' } else { nc == '_' || nc.is_ascii_alphanumeric() };
+            if ok {
+                name.push(nc);
+                chars.next();
+            } else {
+                break;
+            }
+        }
+        let closed = if braced {
+            matches!(chars.peek(), Some((_, '}'))).then(|| chars.next()).is_some()
+        } else {
+            true
+        };
+        match std::env::var(&name) {
+            Ok(val) if !name.is_empty() && closed => out.push_str(&val),
+            _ => {
+                // Not a resolvable variable — put the literal text back.
+                out.push('$');
+                if braced {
+                    out.push('{');
+                }
+                out.push_str(&name);
+                if braced && closed {
+                    out.push('}');
+                }
+            }
+        }
+    }
+    out
+}
+
 /// Parse a date typed into the prompt (with or without brackets) into a timestamp whose
 /// active/inactive flag matches `purpose`. `None` if it isn't a valid, fully-consumed stamp.
 fn parse_date_input(text: &str, purpose: DatePurpose) -> Option<Timestamp> {
@@ -524,10 +596,10 @@ impl App {
                     Kind::Tags => self.apply_tags(&text),
                     Kind::Date(purpose) => self.apply_date(purpose, &text),
                     Kind::SaveAs | Kind::Open => {
-                        let path = PathBuf::from(text);
-                        if path.as_os_str().is_empty() {
+                        if text.trim().is_empty() {
                             return;
                         }
+                        let path = expand_path(&text);
                         if matches!(kind, Kind::SaveAs) {
                             self.save_as(&path);
                         } else {
@@ -665,19 +737,26 @@ impl App {
             self.switch_to(index);
             return;
         }
-        let buffer = if path.exists() {
+        let (buffer, opened) = if path.exists() {
             match Document::open(&path) {
-                Ok(doc) => Buffer::new(doc, None),
+                Ok(doc) => (Buffer::new(doc, None), true),
                 Err(e) => {
                     self.status = format!("cannot open {}: {e}", path.display());
                     return;
                 }
             }
         } else {
-            Buffer::new(Document::new(), Some(path))
+            (Buffer::new(Document::new(), Some(path)), false)
         };
+        // Make the outcome explicit so an unresolved path can't masquerade as a loaded file.
+        let name = buffer.display_name();
         self.buffers.push(buffer);
         self.switch_to(self.buffers.len() - 1);
+        self.status = if opened {
+            format!("Opened {name}")
+        } else {
+            format!("New file: {name}")
+        };
     }
 }
 
@@ -706,6 +785,74 @@ mod tests {
 
     fn temp_path(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!("textr_app_{}_{}.org", name, std::process::id()))
+    }
+
+    // ---- path expansion in the Open / Save As prompts -------------------------
+
+    #[test]
+    fn expand_path_expands_a_leading_tilde() {
+        let home = home_dir().expect("HOME set in the test environment");
+        assert_eq!(expand_path("~"), home);
+        assert_eq!(expand_path("~/scripts/foo.sh"), home.join("scripts/foo.sh"));
+        // A tilde not at the start is left alone.
+        assert_eq!(expand_path("/etc/~x"), PathBuf::from("/etc/~x"));
+    }
+
+    #[test]
+    fn expand_path_expands_environment_variables() {
+        // PATH always exists; compare against the real value without mutating the env.
+        let path_val = std::env::var("PATH").unwrap();
+        assert_eq!(expand_path("$PATH/bin"), PathBuf::from(format!("{path_val}/bin")));
+        assert_eq!(expand_path("${PATH}/bin"), PathBuf::from(format!("{path_val}/bin")));
+        // An undefined variable is left verbatim rather than blanked.
+        assert_eq!(
+            expand_path("$TORG_NOPE_UNDEFINED/x"),
+            PathBuf::from("$TORG_NOPE_UNDEFINED/x")
+        );
+    }
+
+    #[test]
+    fn expand_path_leaves_a_plain_absolute_path_unchanged() {
+        assert_eq!(expand_path("/tmp/a/b.sh"), PathBuf::from("/tmp/a/b.sh"));
+    }
+
+    #[test]
+    fn ctrl_o_reports_opened_for_an_existing_file_and_new_for_a_missing_one() {
+        let path = temp_path("open_status");
+        std::fs::write(&path, "* content\n").unwrap();
+        let mut app = single(Document::from_text("home\n"), None);
+
+        ctrl(&mut app, 'o');
+        typ(&mut app, path.to_str().unwrap());
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(app.document().text(), "* content\n");
+        assert!(app.status().starts_with("Opened "), "status was {:?}", app.status());
+
+        let missing = temp_path("open_missing");
+        let _ = std::fs::remove_file(&missing);
+        ctrl(&mut app, 'o');
+        typ(&mut app, missing.to_str().unwrap());
+        press(&mut app, KeyCode::Enter);
+        assert!(app.status().starts_with("New file: "), "status was {:?}", app.status());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn ctrl_o_with_a_tilde_path_opens_the_real_file() {
+        // Write a file under $HOME and open it via ~, proving expansion runs in the prompt.
+        let home = home_dir().expect("HOME set");
+        let name = format!("torg_tilde_{}.org", std::process::id());
+        let path = home.join(&name);
+        std::fs::write(&path, "* tilde\n").unwrap();
+        let mut app = single(Document::from_text("home\n"), None);
+
+        ctrl(&mut app, 'o');
+        typ(&mut app, &format!("~/{name}"));
+        press(&mut app, KeyCode::Enter);
+
+        assert_eq!(app.document().text(), "* tilde\n");
+        assert!(app.status().starts_with("Opened "));
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
