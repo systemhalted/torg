@@ -148,9 +148,12 @@ Several files can be open at once; each keeps its own cursor, folds, and scroll 
 switching away and back puts you exactly where you left off.
 
 - **Open** — pass several paths on the command line, or press `Ctrl+O` and type a path
-  (`Enter` opens, `Esc` cancels). A path that is already open — even one still waiting for its
-  first save — switches to that buffer instead of opening a second copy. A path that doesn't
-  exist yet starts an empty buffer that will save there.
+  (`Enter` opens, `Esc` cancels). A leading `~` and `$VAR`/`${VAR}` are expanded, so
+  `~/notes/todo.org` works; relative paths resolve against torg's working directory. The
+  status line confirms which happened — `Opened <name>` when an existing file loads, or
+  `New file: <name>` when the path doesn't exist yet (an empty buffer that will save there).
+  A path that is already open — even one still waiting for its first save — switches to that
+  buffer instead of opening a second copy.
 - **Switch** — `Alt+N` / `Alt+P` cycle through the open buffers (wrapping at the ends), or
   press `Ctrl+B` for a list of open files: move with `↑`/`↓` and press `Enter`, or jump
   straight to a buffer with `1`-`9`. Dirty buffers show a `*` in the list. (`Ctrl+B` is the
@@ -164,7 +167,8 @@ With more than one file open, the status line gains a position marker: `[2/3] no
 
 - `Ctrl+S` on a buffer that has a file writes it and briefly shows `Saved` on the status line.
 - `Ctrl+S` on an **untitled** buffer opens a `Save as:` prompt on the bottom line. Type a path
-  and press `Enter` to write it, or `Esc` to cancel. `Backspace` edits the path.
+  and press `Enter` to write it, or `Esc` to cancel. `Backspace` edits the path. As in the
+  *Open* prompt, a leading `~` and `$VAR`/`${VAR}` are expanded.
 - If a write fails (e.g. a bad directory), the error appears on the status line — the editor
   does not crash and the buffer stays marked unsaved.
 
