@@ -63,6 +63,82 @@ enum PromptEvent {
     Submitted(String),
 }
 
+/// The longest common prefix of `names`.
+fn common_prefix<'a>(mut names: impl Iterator<Item = &'a str>) -> String {
+    let Some(first) = names.next() else {
+        return String::new();
+    };
+    let mut prefix = first.to_string();
+    for n in names {
+        while !n.starts_with(&prefix) {
+            prefix.pop();
+            if prefix.is_empty() {
+                return prefix;
+            }
+        }
+    }
+    prefix
+}
+
+/// Complete the final segment of a path typed into a prompt against the filesystem. Returns
+/// the (possibly unchanged) new input and an optional status message. A leading `~`/`$VAR` in
+/// the directory portion is expanded for the lookup but preserved verbatim in the result.
+fn complete_path(input: &str) -> (String, Option<String>) {
+    let (prefix, partial) = match input.rfind('/') {
+        Some(i) => (&input[..=i], &input[i + 1..]),
+        None => ("", input),
+    };
+    let dir = if prefix.is_empty() {
+        PathBuf::from(".")
+    } else {
+        expand_path(prefix)
+    };
+    let Ok(read) = std::fs::read_dir(&dir) else {
+        return (input.to_string(), Some(format!("cannot read {}", dir.display())));
+    };
+    let mut names: Vec<(String, bool)> = read
+        .filter_map(Result::ok)
+        .map(|e| {
+            let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
+            (e.file_name().to_string_lossy().into_owned(), is_dir)
+        })
+        .filter(|(name, _)| name.starts_with(partial))
+        .collect();
+    if !partial.starts_with('.') {
+        names.retain(|(n, _)| !n.starts_with('.')); // hide dotfiles unless asked for
+    }
+    names.sort();
+    match names.as_slice() {
+        [] => (input.to_string(), Some("(no match)".into())),
+        [(name, is_dir)] => {
+            let mut done = format!("{prefix}{name}");
+            if *is_dir {
+                done.push('/');
+            }
+            (done, None)
+        }
+        many => {
+            let common = common_prefix(many.iter().map(|(n, _)| n.as_str()));
+            if common.len() > partial.len() {
+                (format!("{prefix}{common}"), None)
+            } else {
+                let mut shown: Vec<String> = many
+                    .iter()
+                    .take(15)
+                    .map(|(n, d)| if *d { format!("{n}/") } else { n.clone() })
+                    .collect();
+                if many.len() > 15 {
+                    shown.push(format!("(+{} more)", many.len() - 15));
+                }
+                (
+                    input.to_string(),
+                    Some(format!("{} matches: {}", many.len(), shown.join("  "))),
+                )
+            }
+        }
+    }
+}
+
 /// The user's home directory, from `$HOME` (or `%USERPROFILE%` on Windows).
 fn home_dir() -> Option<PathBuf> {
     std::env::var_os("HOME")
@@ -580,6 +656,29 @@ impl App {
             Mode::DatePrompt { purpose, .. } => Kind::Date(*purpose),
             _ => return,
         };
+        // Any prompt keystroke clears the previous transient message (completion hints, errors)
+        // so it reads as feedback for the last action, not stale text.
+        if key.kind == KeyEventKind::Press {
+            self.status.clear();
+        }
+        // Tab completes a path in the Open / Save As prompts.
+        if key.code == KeyCode::Tab
+            && key.kind == KeyEventKind::Press
+            && matches!(kind, Kind::SaveAs | Kind::Open)
+        {
+            let completed = match &self.mode {
+                Mode::SaveAs { input } | Mode::OpenFile { input } => Some(complete_path(input)),
+                _ => None,
+            };
+            if let Some((new_input, status)) = completed {
+                match &mut self.mode {
+                    Mode::SaveAs { input } | Mode::OpenFile { input } => *input = new_input,
+                    _ => {}
+                }
+                self.status = status.unwrap_or_default();
+            }
+            return;
+        }
         let event = match &mut self.mode {
             Mode::SaveAs { input }
             | Mode::OpenFile { input }
@@ -785,6 +884,130 @@ mod tests {
 
     fn temp_path(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!("textr_app_{}_{}.org", name, std::process::id()))
+    }
+
+    // ---- path tab-completion --------------------------------------------------
+
+    fn common(names: &[&str]) -> String {
+        common_prefix(names.iter().copied())
+    }
+
+    #[test]
+    fn common_prefix_of_names() {
+        assert_eq!(common(&["alpha", "alpine", "al"]), "al");
+        assert_eq!(common(&["one"]), "one");
+        assert_eq!(common(&["a", "b"]), "");
+        assert_eq!(common(&[]), "");
+    }
+
+    /// Create a temp directory containing `entries` (name, is_dir), returning its path.
+    fn make_dir(label: &str, entries: &[(&str, bool)]) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("torg_tab_{}_{}", label, std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        for (name, is_dir) in entries {
+            let p = dir.join(name);
+            if *is_dir {
+                std::fs::create_dir_all(&p).unwrap();
+            } else {
+                std::fs::write(&p, "").unwrap();
+            }
+        }
+        dir
+    }
+
+    #[test]
+    fn tab_completes_a_unique_prefix_and_slashes_directories() {
+        let dir = make_dir("unique", &[("notes.org", false), ("other.txt", false), ("sub", true)]);
+        let (out, status) = complete_path(&format!("{}/not", dir.display()));
+        assert_eq!(out, format!("{}/notes.org", dir.display()));
+        assert!(status.is_none());
+        let (out, _) = complete_path(&format!("{}/su", dir.display()));
+        assert_eq!(out, format!("{}/sub/", dir.display())); // directory → trailing slash
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn tab_extends_to_the_common_prefix_when_ambiguous() {
+        let dir = make_dir("ambig", &[("report-a.org", false), ("report-b.org", false)]);
+        let (out, status) = complete_path(&format!("{}/rep", dir.display()));
+        assert_eq!(out, format!("{}/report-", dir.display()));
+        assert!(status.is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn tab_lists_candidates_when_it_cannot_extend() {
+        let dir = make_dir("list", &[("apple", false), ("banana", false)]);
+        let input = format!("{}/", dir.display());
+        let (out, status) = complete_path(&input);
+        assert_eq!(out, input); // unchanged
+        let s = status.unwrap();
+        assert!(s.contains("apple") && s.contains("banana"), "status was {s:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn tab_reports_no_match() {
+        let dir = make_dir("nomatch", &[("apple", false)]);
+        let (out, status) = complete_path(&format!("{}/zzz", dir.display()));
+        assert_eq!(out, format!("{}/zzz", dir.display()));
+        assert!(status.unwrap().to_lowercase().contains("no match"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn tab_hides_dotfiles_unless_the_partial_is_dotted() {
+        let dir = make_dir("dot", &[(".hidden.org", false), ("visible.org", false)]);
+        let (out, _) = complete_path(&format!("{}/", dir.display()));
+        assert_eq!(out, format!("{}/visible.org", dir.display())); // dotfile skipped
+        let (out2, _) = complete_path(&format!("{}/.hid", dir.display()));
+        assert_eq!(out2, format!("{}/.hidden.org", dir.display())); // dotted partial reaches it
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn tab_in_the_open_prompt_completes_the_input() {
+        let dir = make_dir("appopen", &[("uniquename.org", false)]);
+        let mut app = single(Document::from_text("home\n"), None);
+        ctrl(&mut app, 'o');
+        typ(&mut app, &format!("{}/uniq", dir.display()));
+        press(&mut app, KeyCode::Tab);
+        assert_eq!(
+            app.mode(),
+            &Mode::OpenFile {
+                input: format!("{}/uniquename.org", dir.display())
+            }
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn tab_in_the_save_as_prompt_also_completes() {
+        let dir = make_dir("appsave", &[("draft.org", false)]);
+        let mut app = single(Document::from_text("x"), None);
+        ctrl(&mut app, 's'); // untitled → Save As prompt
+        typ(&mut app, &format!("{}/dra", dir.display()));
+        press(&mut app, KeyCode::Tab);
+        assert_eq!(
+            app.mode(),
+            &Mode::SaveAs {
+                input: format!("{}/draft.org", dir.display())
+            }
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn tab_with_several_matches_shows_them_on_the_status_line() {
+        let dir = make_dir("appmany", &[("apple", false), ("banana", false)]);
+        let mut app = single(Document::from_text("home\n"), None);
+        ctrl(&mut app, 'o');
+        typ(&mut app, &format!("{}/", dir.display()));
+        press(&mut app, KeyCode::Tab);
+        assert!(matches!(app.mode(), Mode::OpenFile { .. })); // still prompting
+        assert!(app.status().contains("apple") && app.status().contains("banana"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     // ---- path expansion in the Open / Save As prompts -------------------------

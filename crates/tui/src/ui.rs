@@ -211,9 +211,15 @@ fn push_plain(spans: &mut Vec<Span<'static>>, text: &str, base: Style) {
 /// The status-line text: the Save-As prompt, or `[i/n] name[*] — line:col` plus any transient
 /// message (the `[i/n]` buffer position appears only when more than one file is open).
 fn status_text(app: &App) -> String {
+    // A completion hint / error appended to a path prompt, when present.
+    let hint = if app.status().is_empty() {
+        String::new()
+    } else {
+        format!("   {}", app.status())
+    };
     match app.mode() {
-        Mode::SaveAs { input } => return format!("Save as: {input}"),
-        Mode::OpenFile { input } => return format!("Open: {input}"),
+        Mode::SaveAs { input } => return format!("Save as: {input}{hint}"),
+        Mode::OpenFile { input } => return format!("Open: {input}{hint}"),
         Mode::EditTags { input } => return format!("Tags: {input}"),
         Mode::DatePrompt { input, purpose } => {
             return format!("{}{input}", date_prompt_label(*purpose))
