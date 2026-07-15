@@ -1,0 +1,95 @@
+name: Bug report
+description: Something in torg doesn't behave the way it should.
+title: "[bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug! The more detail you give, the faster it can
+        be reproduced and fixed. If you're unsure whether something is a bug or intended, the
+        [feature guide](https://github.com/systemhalted/torg/blob/main/docs/guide.md) often has
+        the answer.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, and what went wrong?
+      placeholder: I pressed Ctrl+O and typed ~/notes.org, but the buffer opened empty.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: >
+        A numbered list. If the file content matters, paste the smallest Org/Markdown snippet
+        that triggers it.
+      placeholder: |
+        1. torg /tmp/x.org
+        2. Type `* TODO task`
+        3. Put the cursor on the heading and press Shift+Up
+      render: text
+    validations:
+      required: true
+  - type: dropdown
+    id: format
+    attributes:
+      label: File format
+      description: What kind of buffer were you editing?
+      options:
+        - Org (.org, or any non-Markdown / untitled buffer)
+        - Markdown (.md / .markdown)
+        - Not applicable
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: torg version
+      description: >
+        The release tag you installed (e.g. v0.2.2), or "built from source" with the commit
+        hash if you cloned the repo.
+      placeholder: v0.2.2
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How did you install torg?
+      options:
+        - Homebrew (brew install systemhalted/tap/torg)
+        - .deb (Debian/Ubuntu)
+        - Downloaded binary (release tarball)
+        - Built from source (cargo)
+        - Other
+  - type: input
+    id: os
+    attributes:
+      label: OS and version
+      placeholder: macOS 15.1 (Apple Silicon) / Ubuntu 24.04 (x86-64)
+    validations:
+      required: true
+  - type: input
+    id: terminal
+    attributes:
+      label: Terminal emulator (and multiplexer, if any)
+      description: >
+        Terminal-editor bugs are often specific to the terminal — especially key handling.
+        Include tmux/screen and its version if you use one.
+      placeholder: iTerm2 / GNOME Terminal / Alacritty, under tmux 3.4
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: >
+        Screenshots, a screen recording, or a pasted terminal capture all help a lot for a
+        full-screen editor.

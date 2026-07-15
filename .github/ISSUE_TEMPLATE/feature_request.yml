@@ -1,0 +1,47 @@
+name: Feature request
+description: Suggest a capability or improvement for torg.
+title: "[feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the idea! torg is working toward Org mode's core feature set — the
+        [roadmap](https://github.com/systemhalted/torg/blob/main/docs/roadmap.md) maps where
+        features are headed and traces each one back to
+        [Org mode's feature set](https://orgmode.org/features.html), so it's worth a quick look
+        to see if this is already planned.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: What are you trying to do that torg makes hard or impossible today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like torg to do?
+      description: Describe the behavior you'd want. A concrete example (before → after) helps.
+    validations:
+      required: true
+  - type: dropdown
+    id: format
+    attributes:
+      label: Which format(s) does this apply to?
+      multiple: true
+      options:
+        - Org
+        - Markdown
+        - Both / format-agnostic
+  - type: input
+    id: org-parallel
+    attributes:
+      label: Is there an Org mode (or other editor) equivalent?
+      description: If something already does this, a link helps match its behavior.
+      placeholder: https://orgmode.org/manual/...
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you've considered
+      description: Other ways to solve the same problem, and why they fall short.

@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation — feature guide
+    url: https://github.com/systemhalted/torg/blob/main/docs/guide.md
+    about: A hands-on tour of every feature. Often answers "is this a bug or expected?"
+  - name: Documentation — key reference
+    url: https://github.com/systemhalted/torg/blob/main/docs/usage.md
+    about: The terse one-screen list of keybindings.
+  - name: Roadmap
+    url: https://github.com/systemhalted/torg/blob/main/docs/roadmap.md
+    about: Planned features and where torg is headed — check before filing a feature request.
