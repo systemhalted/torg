@@ -179,10 +179,39 @@ The Open prompt is smart about paths:
 | `Ctrl+Q` | quit torg |
 
 `Ctrl+W` on a buffer with unsaved changes asks `y/n` first. Closing the *last* buffer leaves a
-fresh untitled one rather than quitting. With more than one file open, the status line shows a
-position marker: `[2/3] notes.org*` (the `*` means unsaved changes).
+fresh untitled one rather than quitting.
 
 > `Ctrl+B` is also the default tmux prefix key — inside tmux, press it twice or rebind tmux.
+
+### The status line
+
+The bottom row is the **status line**. In normal editing it reads, left to right:
+
+```
+[2/3] notes.org* — 3:5   Saved
+ └┬─┘ └───┬───┘│  └┬┘    └─┬─┘
+  │       │    │   │       transient message
+  │       │    │   cursor line:col (1-based)
+  │       │    unsaved-changes marker
+  │       buffer name
+  buffer position — current/total, only shown with more than one buffer open
+```
+
+- **`[2/3]`** — the **buffer position**: you're on buffer 2 of 2… of *3* open. It appears only
+  when more than one buffer is open, and disappears again once you're down to a single file.
+  (Opening the in-editor help with `Ctrl+H`/`Ctrl+U` adds a buffer, which is a common reason
+  to suddenly see `[2/2]`.)
+- **name** — the file's name, `[No Name]` for an untitled buffer, or a label like
+  `*Quick reference*` / `*torg guide*` for the help buffers.
+- **`*`** — shown when the buffer has unsaved changes.
+- **`line:col`** — the cursor's position, both counting from 1.
+- **transient message** — brief feedback like `Saved`, `Opened notes.org`, `New file: x.org`,
+  a tab-completion hint, or an error; it clears on your next keystroke.
+
+The same row doubles as torg's **prompt line**: the `Open:`, `Save as:`, `Tags:`,
+`Scheduled:`/`Deadline:`, and timestamp prompts show what you're typing there; the buffer list
+(`Ctrl+B`) shows its picker; and `y/n` confirmations (close/quit with unsaved changes) show
+their question.
 
 ### Saving and *Save As*
 

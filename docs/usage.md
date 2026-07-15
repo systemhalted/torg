@@ -189,16 +189,24 @@ With more than one file open, the status line gains a position marker: `[2/3] no
 
 ## The status line
 
-The bottom row shows, from left: the buffer position (`[2/3]`, only when more than one file is
-open), the file name (or `[No Name]` for an untitled buffer), a `*` if there are unsaved
-changes, and the cursor position as `line:col` (both 1-based). Transient messages like `Saved`
-appear to the right. In the *Save As* and *Open* prompts this row becomes `Save as:` / `Open:`
-followed by what you've typed; confirmations and the buffer list put their question or key
-hints here too.
+The bottom row, in normal editing, shows from left to right:
 
 ```
 [2/3] notes.org* — 3:5   Saved
 ```
+
+- **`[2/3]`** — buffer position: current buffer / total open. Shown **only** when more than one
+  buffer is open (hidden with a single file). Opening the in-editor help adds a buffer, so this
+  is why you might see `[2/2]` appear.
+- **name** — the file name, `[No Name]` for an untitled buffer, or `*Quick reference*` /
+  `*torg guide*` for the help buffers.
+- **`*`** — the buffer has unsaved changes.
+- **`3:5`** — cursor `line:col`, both 1-based.
+- **`Saved`** — a transient message (also `Opened <file>`, `New file: <file>`, completion
+  hints, errors); cleared on the next keystroke.
+
+The same row becomes the prompt line for `Open:` / `Save as:` / `Tags:` / `Scheduled:` /
+`Deadline:` / timestamp input, the `Ctrl+B` buffer picker, and `y/n` confirmations.
 
 ## Known limitations
 
