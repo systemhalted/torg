@@ -38,7 +38,8 @@ OPTIONS:
 
 IN THE EDITOR:
     Ctrl+Q  quit        Ctrl+O  open a file      Ctrl+S  save
-    Ctrl+K  key reference (quick help)           Ctrl+U  full guide
+    Ctrl+H  key reference (quick help; Ctrl+K if your terminal eats Ctrl+H)
+    Ctrl+U  full guide
 
 Files ending in .md or .markdown are treated as Markdown; everything else as Org.
 Full guide: https://github.com/systemhalted/torg/blob/main/docs/guide.md

@@ -28,9 +28,10 @@ torg notes.org ideas.org  # several files — the first is shown, Alt+N reaches 
 - **No argument** starts an untitled buffer; the first `Ctrl+S` asks where to save.
 
 `torg --help` prints a usage summary and `torg --version` prints the version. Inside the
-editor, `Ctrl+K` opens this reference and `Ctrl+U` opens the full [guide](guide.md) — each in a
-buffer you read like any other and close with `Ctrl+W`. Installed via a package, the reference
-is also a man page: `man torg`.
+editor, `Ctrl+H` opens this reference and `Ctrl+U` opens the full [guide](guide.md) — each in a
+buffer you read like any other and close with `Ctrl+W`. (`Ctrl+H` is the mnemonic for help;
+`Ctrl+K` also opens the reference for the few terminals that send `Ctrl+H` as `Backspace`.)
+Installed via a package, the reference is also a man page: `man torg`.
 
 ## Keys
 
@@ -61,7 +62,7 @@ is also a man page: `man torg`.
 | `Alt+N` / `Alt+P` | Switch to the next / previous buffer (wraps around). |
 | `Ctrl+B` | Open the buffer list — pick an open file with `↑`/`↓` + `Enter` or `1`-`9`. |
 | `Ctrl+W` | Close the current buffer (asks `y/n` if it has unsaved changes). |
-| `Ctrl+K` / `Ctrl+U` | Open this key reference / the full guide in the editor. |
+| `Ctrl+H` / `Ctrl+U` | Open this key reference / the full guide in the editor (`Ctrl+K` also opens the reference, for terminals that can't distinguish `Ctrl+H` from `Backspace`). |
 | `Ctrl+Q` | Quit (asks `y/n` if any buffer has unsaved changes). |
 | `Esc` | Cancel a prompt, the buffer list, or a confirmation. |
 

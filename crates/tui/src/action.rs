@@ -106,7 +106,9 @@ pub fn key_to_action(key: KeyEvent) -> Option<Action> {
             'b' => Some(Action::ListBuffers),
             'w' => Some(Action::CloseBuffer),
             'g' => Some(Action::EditTags),
-            'k' => Some(Action::Help),
+            // Help: `h` is the mnemonic (works where the terminal distinguishes Ctrl+H from
+            // Backspace); `k` is the always-reliable fallback.
+            'h' | 'k' => Some(Action::Help),
             'u' => Some(Action::Guide),
             _ => None,
         },
@@ -230,8 +232,9 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_k_and_ctrl_u_open_the_docs() {
-        assert_eq!(key_to_action(ctrl('k')), Some(Action::Help));
+    fn ctrl_h_and_ctrl_k_open_help_and_ctrl_u_the_guide() {
+        assert_eq!(key_to_action(ctrl('h')), Some(Action::Help)); // primary, mnemonic
+        assert_eq!(key_to_action(ctrl('k')), Some(Action::Help)); // portable fallback
         assert_eq!(key_to_action(ctrl('u')), Some(Action::Guide));
     }
 
