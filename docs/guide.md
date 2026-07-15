@@ -17,6 +17,9 @@ Markdown** examples. Where there's no pairing, the feature works identically in 
 
 ## Table of contents
 
+New to editor jargon like *buffer* or *subtree*? Start with
+[Concepts and vocabulary](#concepts-and-vocabulary).
+
 1. [First run](#1-first-run)
 2. [Moving around and basic editing](#2-moving-around-and-basic-editing)
 3. [Files, buffers, and formats](#3-files-buffers-and-formats)
@@ -28,6 +31,62 @@ Markdown** examples. Where there's no pairing, the feature works identically in 
 9. [Org vs Markdown: what differs](#9-org-vs-markdown-what-differs)
 10. [Full keybinding reference](#10-full-keybinding-reference)
 11. [Limits and what's next](#11-limits-and-whats-next)
+
+---
+
+## Concepts and vocabulary
+
+torg borrows a few terms from Emacs and Org mode. They're worth knowing before the tour —
+they show up throughout this guide and on torg's status line.
+
+**Editing**
+
+- **Buffer** — an in-memory working copy of a file that you're editing. Opening a file loads it
+  into a buffer; your edits happen in the buffer and only reach the file on disk when you
+  **save**. torg can hold several buffers open at once, and each remembers its own cursor
+  position, folds, and scroll — so switching between files is instant and lossless. (The term
+  comes from Emacs; think "a tab" in other editors, minus the tab bar.)
+- **Untitled buffer** — a buffer not yet tied to a file (you started torg with no argument, or
+  opened a path that doesn't exist). Its first save asks where to write it.
+- **Modified** (or *dirty*) — a buffer with unsaved changes. The status line marks it with a
+  `*`; torg warns before you close or quit a modified buffer.
+- **Goal column** — the column `↑`/`↓` try to keep as you move through lines of different
+  lengths, so paging down and back up returns you to where you started horizontally.
+- **Status line** — the bottom row of the screen. It shows the current buffer's name, a `*` if
+  modified, the buffer position (`[2/3]`) when several are open, and the cursor's `line:col`.
+  It also becomes the **prompt** line for commands that need input (Open, Save As, tags,
+  dates) — you type there and press `Enter` or `Esc`.
+
+**Structure**
+
+- **Outline** — the tree of headings torg derives from a buffer. It's re-read as you type, so
+  it always matches the text.
+- **Heading** — a line that is a node in the outline: `*`-prefixed in Org, `#`-prefixed in
+  Markdown. Everything that isn't a heading is body text.
+- **Level** — a heading's depth, given by how many markers it has: `*` / `#` is level 1, `**` /
+  `##` is level 2, and so on.
+- **Subtree** — a heading together with everything beneath it, down to (but not including) the
+  next heading of the same or a shallower level. Folding, moving, and promoting a "subtree"
+  act on this whole block.
+- **Fold** — a collapsed subtree: its body and children are hidden and the heading shows a `…`.
+  Folding is a *view* — it never changes the text.
+
+**Metadata (on a heading)**
+
+- **TODO keyword** — a `TODO` or `DONE` state marking a heading as a task.
+- **Priority cookie** — a `[#A]`, `[#B]`, or `[#C]` marker (A is highest).
+- **Tag** — a `:label:` at the end of a headline; several read `:work:urgent:`.
+- **Timestamp** — a date (optionally a time and range) written in brackets. **Active** `<…>`
+  timestamps are the kind an agenda would collect; **inactive** `[…]` ones are just notes.
+- **Planning line** — the indented `SCHEDULED:` / `DEADLINE:` line torg writes directly below a
+  heading (an Org-only concept).
+- **Repeater / warning** — cookies inside a timestamp: `+1w` makes it recur, `-2d` sets a
+  warning lead.
+
+**Formats**
+
+- **Format** — whether a buffer is parsed as **Org** or **Markdown**. torg picks it from the
+  file extension and re-checks on *Save As*; the two share almost all commands (see §9).
 
 ---
 
