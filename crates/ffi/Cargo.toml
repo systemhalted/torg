@@ -1,0 +1,23 @@
+[package]
+name = "torg-ffi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "UniFFI bindings that expose torg-core to Swift (and other languages) — used by the iOS/iPad frontend."
+
+# UniFFI needs the static/dynamic library artifacts for the Swift bridge; `lib` keeps it a
+# normal Rust crate too (so host `cargo test` works and the workspace stays coherent).
+[lib]
+name = "torg_ffi"
+crate-type = ["lib", "staticlib", "cdylib"]
+
+# The uniffi-bindgen CLI that generates the Swift bindings (`cargo run -p torg-ffi --bin
+# uniffi-bindgen -- generate ...`). Kept in this crate so its uniffi version always matches.
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+
+[dependencies]
+torg-core = { path = "../core" }
+uniffi = { version = "0.28", features = ["cli"] }

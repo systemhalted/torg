@@ -141,9 +141,16 @@ column view over properties, LaTeX fragment display, speed keys, and the package
 API over a stable core — the point where `torg`'s capabilities are meant to become
 installable packages (see the `textr` sibling project's plan).
 
-### M11 — GUI
-A desktop frontend (gtk4-rs) reusing the **same** core *and* the same driver-agnostic state and
-render logic (see [`architecture.md`](architecture.md)); only the input/output driver is new.
+### M11 — GUI (desktop and mobile)
+Graphical frontends reusing the **same** core — a desktop app (gtk4-rs) and a native
+iPad/iOS app (SwiftUI) — each reusing `torg-core` unchanged; only the input/output driver is
+new (see [`architecture.md`](architecture.md)).
+
+*Status: a **spike** for the iPad direction is in [`ios/`](../ios/) — `torg-core` compiled for
+iOS and bridged to SwiftUI through the [`torg-ffi`](../crates/ffi) UniFFI crate, driving a
+touch view that renders the outline and cycles TODOs. It validates the "headless core on
+mobile" pipeline; the full frontend (persistence, a real editing surface, a touch-native
+command model) is the milestone's remaining work.*
 
 ## Why this order
 
