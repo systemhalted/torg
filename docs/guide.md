@@ -14,7 +14,7 @@ Markdown** examples. Where there's no pairing, the feature works identically in 
 
 > This is the narrative walkthrough. For a terse one-screen key reference, see
 > [`usage.md`](usage.md); for the project's design, see [`architecture.md`](architecture.md).
-> You can also read this guide **inside torg** — press `Ctrl+U` (and `Ctrl+K` for the quick
+> You can also read this guide **inside torg** — press `Ctrl+U` (and `Ctrl+H` for the quick
 > reference).
 
 ## Table of contents
