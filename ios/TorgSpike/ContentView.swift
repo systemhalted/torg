@@ -50,13 +50,13 @@ struct ContentView: View {
             .listStyle(.plain)
             .navigationTitle("torg spike")
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .navigationBarTrailing) {
                     Picker("Format", selection: $markdown) {
                         Text("Org").tag(false)
                         Text("Markdown").tag(true)
                     }
                     .pickerStyle(.segmented)
-                    .onChange(of: markdown) {
+                    .onChange(of: markdown) { _ in
                         text = markdown ? sampleMarkdown : sampleOrg
                         collapsed = []
                     }
@@ -112,6 +112,9 @@ struct ContentView: View {
     }
 }
 
-#Preview {
-    ContentView()
+// The #Preview macro needs Xcode 15 / Swift 5.9; use PreviewProvider for Xcode 14.2.
+struct ContentView_Previews: PreviewProvider {
+    static var previews: some View {
+        ContentView()
+    }
 }
