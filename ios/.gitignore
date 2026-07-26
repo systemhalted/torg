@@ -1,0 +1,7 @@
+# Build products of build-rust.sh and Xcode — regenerated, never committed.
+Generated/
+Headers/
+build/
+TorgFFI.xcframework/
+TorgSpike.xcodeproj/
+DerivedData/

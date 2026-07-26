@@ -1,0 +1,29 @@
+# XcodeGen project for the torg iPad/iOS spike.
+# Generate the Xcode project with:  xcodegen generate   (after ./build-rust.sh)
+name: TorgSpike
+options:
+  bundleIdPrefix: com.systemhalted.torg
+  deploymentTarget:
+    iOS: "16.2"   # Xcode 14.2 ships the iOS 16.2 SDK; can't target higher
+targets:
+  TorgSpike:
+    type: application
+    platform: iOS
+    sources:
+      - path: TorgSpike
+      - path: Generated/torg_ffi.swift
+    dependencies:
+      # Static library xcframework built by build-rust.sh — linked, not embedded.
+      - framework: TorgFFI.xcframework
+        embed: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.systemhalted.torg.spike
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        # Feed the auto-generated Info.plist so the simulator install has a valid
+        # CFBundleVersion (CURRENT_PROJECT_VERSION) and CFBundleShortVersionString (MARKETING_VERSION).
+        CURRENT_PROJECT_VERSION: "1"
+        MARKETING_VERSION: "1.0"
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1,2"   # iPhone + iPad
