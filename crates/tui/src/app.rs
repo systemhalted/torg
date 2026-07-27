@@ -323,6 +323,16 @@ impl App {
     pub fn status(&self) -> &str {
         &self.status
     }
+    /// The active search highlight: query + the current match's (line, col), if searching.
+    pub fn search_hl(&self) -> Option<(&str, (usize, usize))> {
+        match &self.mode {
+            Mode::Search { input, .. } if !input.is_empty() => {
+                let b = self.buf();
+                Some((input.as_str(), (b.view.cursor_line(), b.view.cursor_column())))
+            }
+            _ => None,
+        }
+    }
     pub fn should_quit(&self) -> bool {
         self.should_quit
     }
@@ -961,8 +971,8 @@ impl App {
             // "no-wrap" pass over the earlier lines still covers the whole real document
             // when the anchor sits on the trailing phantom line), so we report it ourselves.
             let has_query = matches!(&self.mode, Mode::Search { input, .. } if !input.is_empty());
-            let wraps_at_start =
-                !fwd && has_query && self.buf().view.cursor_char_idx(&self.buf().doc) == 0;
+            let b = self.buf();
+            let wraps_at_start = !fwd && has_query && b.view.cursor_char_idx(&b.doc) == 0;
             let from = self.step_anchor(fwd);
             self.search_from(from, fwd);
             if wraps_at_start && self.status.is_empty() {
@@ -1949,6 +1959,28 @@ mod tests {
         ctrl(&mut app2, 'f');
         typ(&mut app2, "zzz");
         assert_eq!(app2.status(), "Not found");
+    }
+
+    #[test]
+    fn esc_restores_the_scroll_position_too_not_just_the_cursor() {
+        let mut text = String::new();
+        for i in 0..50 {
+            if i == 40 {
+                text.push_str("needle\n");
+            } else {
+                text.push_str(&format!("line {i}\n"));
+            }
+        }
+        let mut app = single(Document::from_text(&text), None);
+        ctrl(&mut app, 'f');
+        typ(&mut app, "needle");
+        assert_eq!(app.view().cursor_line(), 40);
+        app.update_scroll(10); // a small body height forces the viewport to scroll down
+        assert_ne!(app.scroll_top(), 0);
+
+        press(&mut app, KeyCode::Esc);
+        assert_eq!(app.view().cursor_line(), 0);
+        assert_eq!(app.scroll_top(), 0); // the pre-search viewport, not wherever the match left it
     }
 
     #[test]

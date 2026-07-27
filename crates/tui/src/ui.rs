@@ -103,6 +103,7 @@ fn draw_body(frame: &mut Frame, app: &App, body: Rect) -> Option<(u16, u16)> {
     let mut lines: Vec<Line> = Vec::with_capacity(height);
     let mut cursor: Option<(u16, u16)> = None;
     let mut doc_line = app.scroll_top();
+    let search_hl = app.search_hl();
 
     while lines.len() < height && doc_line < doc.line_count() {
         if app.is_hidden(doc_line) {
@@ -126,7 +127,13 @@ fn draw_body(frame: &mut Frame, app: &App, body: Rect) -> Option<(u16, u16)> {
         } else {
             Style::default()
         };
-        lines.push(highlight_line(&text, base));
+        let line = match search_hl {
+            Some((query, (cur_line, cur_col))) => {
+                search_line(&text, query, (doc_line == cur_line).then_some(cur_col), base)
+            }
+            None => highlight_line(&text, base),
+        };
+        lines.push(line);
         doc_line += 1;
     }
 
@@ -206,6 +213,36 @@ fn highlight_line(text: &str, base: Style) -> Line<'static> {
     Line::from(spans)
 }
 
+/// Render one line during search: every `query` occurrence styled, the one starting at
+/// `current` (char col) in the current-match style. Falls back to a single plain span.
+fn search_line(text: &str, query: &str, current: Option<usize>, base: Style) -> Line<'static> {
+    let cols = torg_core::search::matches_in_line(text, query);
+    if cols.is_empty() {
+        return Line::from(Span::styled(text.to_string(), base));
+    }
+    let match_style = base.add_modifier(Modifier::REVERSED);
+    let current_style = base.add_modifier(Modifier::REVERSED | Modifier::BOLD);
+    let chars: Vec<char> = text.chars().collect();
+    let qlen = query.chars().count();
+    let mut spans = Vec::new();
+    let mut at = 0usize;
+    for col in cols {
+        if col < at {
+            continue; // overlapping match already covered
+        }
+        if col > at {
+            spans.push(Span::styled(chars[at..col].iter().collect::<String>(), base));
+        }
+        let style = if current == Some(col) { current_style } else { match_style };
+        spans.push(Span::styled(chars[col..col + qlen].iter().collect::<String>(), style));
+        at = col + qlen;
+    }
+    if at < chars.len() {
+        spans.push(Span::styled(chars[at..].iter().collect::<String>(), base));
+    }
+    Line::from(spans)
+}
+
 fn push_plain(spans: &mut Vec<Span<'static>>, text: &str, base: Style) {
     if !text.is_empty() {
         spans.push(Span::styled(text.to_string(), base));
@@ -228,7 +265,7 @@ fn status_text(app: &App) -> String {
         Mode::DatePrompt { input, purpose } => {
             return format!("{}{input}", date_prompt_label(*purpose))
         }
-        Mode::Search { input, .. } => return format!("Find: {input}"),
+        Mode::Search { input, .. } => return format!("Find: {input}{hint}"),
         Mode::BufferList { .. } => {
             return " Buffers — ↑/↓ or 1-9 select · Enter switch · Esc cancel ".to_string()
         }
@@ -301,6 +338,39 @@ mod tests {
         let line = highlight_line("just prose", Style::default());
         let joined: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
         assert_eq!(joined, "just prose");
+    }
+
+    #[test]
+    fn search_line_styles_every_occurrence_and_the_current_one_distinctly() {
+        let line = search_line("foo bar foo", "foo", Some(8), Style::default());
+        let spans: Vec<&str> = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(spans, vec!["foo", " bar ", "foo"]);
+        assert_ne!(line.spans[0].style, line.spans[1].style);
+        assert_ne!(line.spans[0].style, line.spans[2].style); // current ≠ other matches
+    }
+
+    #[test]
+    fn search_line_without_matches_is_one_plain_span() {
+        let line = search_line("nothing here", "zzz", None, Style::default());
+        assert_eq!(line.spans.len(), 1);
+    }
+
+    #[test]
+    fn status_line_shows_the_find_prompt_hint_while_searching() {
+        let mut app = App::new(vec![Buffer::new(Document::from_text("plain\n"), None)]);
+        app.handle_key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('f'),
+            crossterm::event::KeyModifiers::CONTROL,
+        ));
+        for c in "zzz".chars() {
+            app.handle_key(crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Char(c),
+                crossterm::event::KeyModifiers::NONE,
+            ));
+        }
+        let text = status_text(&app);
+        assert!(text.contains("Find: zzz"), "{text}");
+        assert!(text.contains("Not found"), "{text}");
     }
 
     #[test]
