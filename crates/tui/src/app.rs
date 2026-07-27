@@ -981,16 +981,25 @@ impl App {
             return;
         }
         self.status.clear();
-        let (event, origin, origin_top, forward) = match &mut self.mode {
+        let (event, origin, origin_top, forward, query_is_empty) = match &mut self.mode {
             Mode::Search {
                 input,
                 origin,
                 origin_top,
                 forward,
-            } => (prompt_event(input, key), *origin, *origin_top, *forward),
+            } => {
+                let event = prompt_event(input, key);
+                (event, *origin, *origin_top, *forward, input.is_empty())
+            }
             _ => return,
         };
         match event {
+            PromptEvent::Pending if query_is_empty => {
+                // Empty query matches nothing: the cursor sits at the origin, no status.
+                let b = self.buf_mut();
+                b.view.move_to(&b.doc, origin.0, origin.1);
+                b.scroll_top = origin_top;
+            }
             PromptEvent::Pending => self.search_from(origin, forward),
             PromptEvent::Cancelled => {
                 let b = self.buf_mut();
@@ -1908,6 +1917,19 @@ mod tests {
         assert_eq!(app.view().cursor_line(), 1);
         press(&mut app, KeyCode::Backspace); // query "ga" — first match from the origin
         assert_eq!(app.view().cursor_line(), 0);
+    }
+
+    #[test]
+    fn backspacing_to_an_empty_query_returns_to_the_origin() {
+        let mut app = single(Document::from_text("xxx\ngam\n"), None);
+        ctrl(&mut app, 'f');
+        typ(&mut app, "g");
+        assert_eq!(app.view().cursor_line(), 1);
+        press(&mut app, KeyCode::Backspace); // query now empty
+        assert_eq!(app.view().cursor_line(), 0);
+        assert_eq!(app.view().cursor_column(), 0);
+        assert_eq!(app.status(), "");
+        assert!(matches!(app.mode(), Mode::Search { .. })); // prompt stays open
     }
 
     #[test]
