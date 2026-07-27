@@ -477,6 +477,7 @@ impl App {
             Action::InsertInactiveTs => self.open_date_prompt(DatePurpose::InsertInactive),
             Action::Help => self.open_doc("*Quick reference*", include_str!("../../../docs/usage.md")),
             Action::Guide => self.open_doc("*torg guide*", include_str!("../../../docs/guide.md")),
+            Action::Find => {} // Wired up in the search-mode task.
         }
     }
 

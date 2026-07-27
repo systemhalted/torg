@@ -57,6 +57,9 @@ pub enum Action {
     // documentation
     Help,
     Guide,
+    // search
+    /// Open the incremental-search prompt (Ctrl+F).
+    Find,
 }
 
 /// Map a key press to an [`Action`], or `None` if the key is unbound.
@@ -105,6 +108,7 @@ pub fn key_to_action(key: KeyEvent) -> Option<Action> {
             'o' => Some(Action::OpenFile),
             'b' => Some(Action::ListBuffers),
             'w' => Some(Action::CloseBuffer),
+            'f' => Some(Action::Find),
             'g' => Some(Action::EditTags),
             // Help: `h` is the mnemonic (works where the terminal distinguishes Ctrl+H from
             // Backspace); `k` is the always-reliable fallback.
@@ -171,6 +175,11 @@ mod tests {
             key_to_action(press(KeyCode::Char('a'))),
             Some(Action::InsertChar('a'))
         );
+    }
+
+    #[test]
+    fn ctrl_f_opens_find() {
+        assert_eq!(key_to_action(ctrl('f')), Some(Action::Find));
     }
 
     #[test]
