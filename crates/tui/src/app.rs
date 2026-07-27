@@ -934,8 +934,10 @@ impl App {
         let idx = b.view.cursor_char_idx(&b.doc);
         let idx = if forward {
             (idx + 1).min(b.doc.char_count())
+        } else if idx == 0 {
+            b.doc.char_count()
         } else {
-            idx.saturating_sub(1)
+            idx - 1
         };
         let line = b.doc.char_to_line(idx);
         (line, idx - b.doc.line_to_char(line))
@@ -953,8 +955,19 @@ impl App {
             if let Mode::Search { forward, .. } = &mut self.mode {
                 *forward = fwd;
             }
+            // Stepping backward from the very first character has no earlier position to
+            // land on, so any match `step_anchor`'s wrapped-around anchor finds is
+            // necessarily a wrap. `find`'s own sweep can't tell that from this anchor (its
+            // "no-wrap" pass over the earlier lines still covers the whole real document
+            // when the anchor sits on the trailing phantom line), so we report it ourselves.
+            let has_query = matches!(&self.mode, Mode::Search { input, .. } if !input.is_empty());
+            let wraps_at_start =
+                !fwd && has_query && self.buf().view.cursor_char_idx(&self.buf().doc) == 0;
             let from = self.step_anchor(fwd);
             self.search_from(from, fwd);
+            if wraps_at_start && self.status.is_empty() {
+                self.status = "Wrapped".into();
+            }
             return;
         }
         self.status.clear();
@@ -1936,5 +1949,17 @@ mod tests {
         ctrl(&mut app2, 'f');
         typ(&mut app2, "zzz");
         assert_eq!(app2.status(), "Not found");
+    }
+
+    #[test]
+    fn ctrl_r_at_document_start_wraps_backward() {
+        let mut app = single(Document::from_text("foo x foo\n"), None);
+        ctrl(&mut app, 'f');
+        typ(&mut app, "foo");
+        assert_eq!(app.view().cursor_line(), 0);
+        assert_eq!(app.view().cursor_column(), 0); // lands on the first "foo"
+        ctrl(&mut app, 'r'); // step backward from the very start — must wrap, not no-op
+        assert_eq!(app.view().cursor_column(), 6);
+        assert_eq!(app.status(), "Wrapped");
     }
 }
