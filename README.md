@@ -71,6 +71,9 @@ list:
 - **dates**: Org timestamps parse as data — active/inactive, times, ranges, repeaters; set a
   heading's `SCHEDULED`/`DEADLINE` (`Alt+S`/`Alt+D`), insert a timestamp (`Alt+.`/`Alt+i`),
   and shift the field under the cursor with `Shift+↑/↓`; timestamps are highlighted
+- **incremental search**: `Ctrl+F` opens a *Find* prompt that jumps to the nearest match as
+  you type, `Ctrl+F`/`Ctrl+R` step to the next/previous match, smart case, wraparound, and
+  match highlighting
 
 **The headless core (`torg-core`)** — a `Document` on a [`ropey`](https://crates.io/crates/ropey)
 rope (load/save/*Save As* with typed errors, char-indexed edits, a modified flag), a `View`

@@ -18,7 +18,7 @@
 - Create: `crates/core/src/search.rs`
 - Modify: `crates/core/src/lib.rs` (module + re-exports)
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `crates/core/src/search.rs`:
 
@@ -69,14 +69,14 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Register the module and run the tests to verify they fail**
+- [x] **Step 2: Register the module and run the tests to verify they fail**
 
 In `crates/core/src/lib.rs` add `pub mod search;` after `pub mod document;` (keep the list alphabetical: document, search, structure, timestamp, view).
 
 Run: `cargo test -p torg-core search -- --nocapture`
 Expected: FAIL to compile — `matches_in_line` not found.
 
-- [ ] **Step 3: Implement `matches_in_line`**
+- [x] **Step 3: Implement `matches_in_line`**
 
 Add above the tests in `search.rs`:
 
@@ -117,12 +117,12 @@ pub fn matches_in_line(text: &str, query: &str) -> Vec<usize> {
 }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p torg-core search`
 Expected: 5 passed.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/core/src/search.rs crates/core/src/lib.rs
@@ -137,7 +137,7 @@ git commit -m "Add smart-case per-line matching to a new core search module"
 - Modify: `crates/core/src/search.rs`
 - Modify: `crates/core/src/lib.rs` (re-export)
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to the `tests` module in `search.rs`:
 
@@ -193,12 +193,12 @@ Append to the `tests` module in `search.rs`:
     }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p torg-core search`
 Expected: FAIL to compile — `find` not found.
 
-- [ ] **Step 3: Implement `find`**
+- [x] **Step 3: Implement `find`**
 
 Add to `search.rs` (above the tests):
 
@@ -269,12 +269,12 @@ In `crates/core/src/lib.rs`, extend the flat re-exports (next to the `timestamp`
 pub use search::{find, matches_in_line, Match};
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p torg-core search`
 Expected: 11 passed.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/core/src/search.rs crates/core/src/lib.rs
@@ -288,7 +288,7 @@ git commit -m "Add directional document search with single wraparound"
 **Files:**
 - Modify: `crates/core/src/view.rs`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 In the existing `tests` module of `crates/core/src/view.rs`, add (mirroring the neighboring `move_to_line` tests' style):
 
@@ -308,12 +308,12 @@ In the existing `tests` module of `crates/core/src/view.rs`, add (mirroring the 
 
 (If `move_to_line`'s tests build `doc` immutably, match that — drop the stray `&mut`.)
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cargo test -p torg-core move_to_places`
 Expected: FAIL to compile — no method `move_to`.
 
-- [ ] **Step 3: Implement `move_to`**
+- [x] **Step 3: Implement `move_to`**
 
 Next to `move_to_line` in `view.rs`:
 
@@ -331,12 +331,12 @@ Next to `move_to_line` in `view.rs`:
 
 Adjust the two field names to whatever `view.rs` actually calls them (`move_home`/`move_end` show the pattern — copy their assignments verbatim).
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p torg-core view`
 Expected: all view tests pass, including the new one.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/core/src/view.rs
@@ -350,7 +350,7 @@ git commit -m "Add View::move_to for column-precise cursor placement"
 **Files:**
 - Modify: `crates/tui/src/action.rs`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 In `action.rs`'s tests, next to the other ctrl-chord tests:
 
@@ -361,21 +361,21 @@ In `action.rs`'s tests, next to the other ctrl-chord tests:
     }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cargo test -p torg-tui ctrl_f_opens_find`
 Expected: FAIL to compile — no variant `Find`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Add `Find,` to the `Action` enum (with doc comment `/// Open the incremental-search prompt (Ctrl+F).`) and `'f' => Some(Action::Find),` to the ctrl-chord match arm in `key_to_action` (keep the arm list in the existing order style).
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p torg-tui action`
 Expected: all pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/tui/src/action.rs
@@ -389,7 +389,7 @@ git commit -m "Map Ctrl+F to a new Find action"
 **Files:**
 - Modify: `crates/tui/src/app.rs`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 In `app.rs`'s tests (use the existing `ctrl`/`press`/`type_str`-style helpers; check the helper block at ~line 884 and reuse what exists):
 
@@ -467,12 +467,12 @@ Replace the pseudo-helpers with whatever the existing test module already provid
 pressing arrow keys). Do not invent new public API for tests — the existing tests reach
 state through `handle_key`, `status()`, and `buf()`-style internals.
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p torg-tui search`
 Expected: FAIL to compile — no `Mode::Search`, no `Find` arm.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `app.rs`:
 
@@ -589,12 +589,12 @@ Notes for the implementer:
   the cursor back only when the shorter query still matches somewhere — from-origin
   semantics handle this).
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p torg-tui`
 Expected: all pass, including the 5 new tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/tui/src/app.rs
@@ -609,7 +609,7 @@ git commit -m "Add the incremental-search mode: live jump, stepping, Esc-restore
 - Modify: `crates/tui/src/ui.rs`
 - Modify: `crates/tui/src/app.rs` (one read-only accessor)
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 In `ui.rs`'s tests, next to the existing `highlight_line` tests:
 
@@ -645,12 +645,12 @@ Also add a status-line test next to the existing prompt-format tests:
 (Write it concretely against the neighboring tests' actual helper style — they already
 construct an `App` and call the status/prompt formatter; mirror the `Tags:` test.)
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p torg-tui ui`
 Expected: FAIL to compile — `search_line` not found; `Mode::Search` arm missing (non-exhaustive match errors in `ui.rs` may already appear when Task 5 landed — if `ui.rs` stopped compiling in Task 5, fold the minimal match arms into that task's step 3 to keep the tree green, and note it in that commit).
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 1. `app.rs` accessor (near `status()`/`mode()`):
 
@@ -715,12 +715,12 @@ fn search_line(text: &str, query: &str, current: Option<usize>, base: Style) -> 
    (e.g. the cursor-placement match at the top of the file follows prompt text length —
    mirror the `Tags:` handling, prompt prefix is 6 chars: `Find: `).
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p torg-tui`
 Expected: all pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/tui/src/ui.rs crates/tui/src/app.rs
@@ -737,7 +737,7 @@ git commit -m "Render the Find prompt and highlight search matches in the viewpo
 - Modify: `README.md` (works-today bullet)
 - Modify: `docs/superpowers/specs/2026-07-26-incremental-search-design.md` (Status → `approved design, implemented`)
 
-- [ ] **Step 1: Write the docs**
+- [x] **Step 1: Write the docs**
 
 `docs/usage.md`: add to the key table —
 
@@ -763,12 +763,12 @@ literal text (no regular expressions).
 formats behave identically). `README.md`: extend the works-today feature list with
 incremental search. Keep wording plain; no marketing.
 
-- [ ] **Step 2: Full workspace check**
+- [x] **Step 2: Full workspace check**
 
 Run: `cargo test --workspace && cargo clippy --workspace -- -D warnings && cargo fmt --check`
 Expected: clean. (If `cargo fmt --check` is not part of this repo's CI, skip it — check `.github/workflows/ci.yml` once and follow what CI enforces.)
 
-- [ ] **Step 3: End-to-end tmux verification**
+- [x] **Step 3: End-to-end tmux verification**
 
 Use the project verify skill (`.claude/skills/verify/SKILL.md`). Scenario:
 

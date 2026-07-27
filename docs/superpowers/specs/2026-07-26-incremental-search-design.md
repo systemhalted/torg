@@ -1,6 +1,6 @@
 # In-buffer incremental search
 
-Date: 2026-07-26 · Status: approved design, pre-implementation
+Date: 2026-07-26 · Status: approved design, implemented
 Reference behavior: Emacs isearch (incremental, origin-anchored, smart case), simplified.
 
 ## Goal

@@ -45,6 +45,7 @@ Installed via a package, the reference is also a man page: `man torg`.
 | `Backspace` | Delete the character before the cursor; at column 0, join onto the previous line. |
 | `Delete` | Delete the character at the cursor; at a line's end, pull the next line up. |
 | `Tab` | On a heading line, fold/unfold its subtree. Elsewhere, insert a tab (displayed at 4-column tab stops). |
+| `Ctrl+F` | Find (incremental); `Ctrl+F`/`Ctrl+R` next/previous while open. |
 | `Ctrl+N` / `Ctrl+P` | Jump to the next / previous heading. |
 | `Ctrl+T` | Cycle the current heading's keyword: none → `TODO` → `DONE` → none. |
 | `Alt+←` / `Alt+→` | Promote / demote the current heading (children keep their level). |
@@ -131,6 +132,16 @@ The weekday is optional when you type one — torg fills in (and keeps) the corr
   (Jan 31 → Feb 29 in a leap year). Off a timestamp, `Shift+↑`/`↓` still cycles the priority.
 
 Timestamps and the `SCHEDULED:`/`DEADLINE:` keywords are highlighted in the buffer.
+
+## Search
+
+`Ctrl+F` opens the *Find* prompt. Matching is incremental: the cursor jumps to the
+nearest match as you type. While the prompt is open, `Ctrl+F` steps to the next match
+and `Ctrl+R` to the previous one; the search wraps around the buffer (status: `Wrapped`).
+`Enter` closes the prompt and keeps your place; `Esc` returns to where you started.
+A query in all-lowercase matches case-insensitively; any capital letter makes it exact.
+`Ctrl+F` remembers the last query — press it twice to repeat a search. Searches are
+literal text (no regular expressions).
 
 ## File formats
 

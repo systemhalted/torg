@@ -30,9 +30,10 @@ New to editor jargon like *buffer* or *subtree*? Start with
 6. [Restructuring the tree](#6-restructuring-the-tree)
 7. [Priorities and tags](#7-priorities-and-tags)
 8. [Dates and scheduling](#8-dates-and-scheduling)
-9. [Org vs Markdown: what differs](#9-org-vs-markdown-what-differs)
-10. [Full keybinding reference](#10-full-keybinding-reference)
-11. [Limits and what's next](#11-limits-and-whats-next)
+9. [Search](#9-search)
+10. [Org vs Markdown: what differs](#10-org-vs-markdown-what-differs)
+11. [Full keybinding reference](#11-full-keybinding-reference)
+12. [Limits and what's next](#12-limits-and-whats-next)
 
 ---
 
@@ -88,7 +89,7 @@ they show up throughout this guide and on torg's status line.
 **Formats**
 
 - **Format** — whether a buffer is parsed as **Org** or **Markdown**. torg picks it from the
-  file extension and re-checks on *Save As*; the two share almost all commands (see §9).
+  file extension and re-checks on *Save As*; the two share almost all commands (see §10).
 
 ---
 
@@ -231,7 +232,7 @@ Each buffer is parsed as **Org** or **Markdown**, chosen by the file extension:
 
 The format is **re-detected on *Save As***: start an untitled buffer, write it as `plan.md`,
 and its outline immediately switches to Markdown rules. All the structure commands in the rest
-of this guide work in both formats; the handful of genuine differences are collected in §9.
+of this guide work in both formats; the handful of genuine differences are collected in §10.
 
 ---
 
@@ -517,7 +518,40 @@ easy to spot.
 
 ---
 
-## 9. Org vs Markdown: what differs
+## 9. Search
+
+**`Ctrl+F`** opens the *Find* prompt on the status line. Matching is incremental: as you
+type, the cursor jumps straight to the nearest match, scrolling the view if it isn't
+already on screen.
+
+```
+Ctrl+F, type "needle"    → cursor jumps to the first "needle" at or after where you started
+```
+
+While the prompt is open:
+
+- **`Ctrl+F`** steps to the **next** match; **`Ctrl+R`** steps to the **previous** one.
+- Editing the query (typing or `Backspace`) re-searches from where you opened the prompt,
+  so backspacing walks back toward your starting point rather than the last match found.
+- Reaching the end (or start, stepping backward) of the buffer wraps around and shows
+  `Wrapped` on the status line. A query with no match anywhere shows `Not found`.
+- **`Enter`** closes the prompt and leaves the cursor on the match. **`Esc`** closes it and
+  puts the cursor and view back where they were when you pressed `Ctrl+F`.
+
+Case follows the query: an all-lowercase query matches case-insensitively (`needle` finds
+`Needle` and `NEEDLE`); typing even one capital letter makes the match exact. `Ctrl+F`
+remembers the last query, so pressing it again with an empty prompt re-runs the same
+search immediately.
+
+Every match visible in the viewport is highlighted while the prompt is open, with the
+match under the cursor set apart from the others.
+
+Search is literal text — there's no regular-expression syntax — and works identically in
+Org and Markdown buffers.
+
+---
+
+## 10. Org vs Markdown: what differs
 
 The commands are the same; only a few underlying rules change with the format.
 
@@ -538,7 +572,7 @@ for whichever one you're in.
 
 ---
 
-## 10. Full keybinding reference
+## 11. Full keybinding reference
 
 **Movement & editing**
 
@@ -577,6 +611,13 @@ for whichever one you're in.
 | `Alt+S` / `Alt+D` | set `SCHEDULED` / `DEADLINE` (Org only) |
 | `Alt+.` / `Alt+i` | insert an active `<…>` / inactive `[…]` timestamp |
 
+**Search**
+
+| Key | Action |
+|-----|--------|
+| `Ctrl+F` | open Find (pre-filled with the last query); while open, step to the next match |
+| `Ctrl+R` | while Find is open, step to the previous match |
+
 **Files & buffers**
 
 | Key | Action |
@@ -591,7 +632,7 @@ for whichever one you're in.
 
 ---
 
-## 11. Limits and what's next
+## 12. Limits and what's next
 
 torg is built in small, runnable milestones. What you've read here is everything that works
 today; several Org-class features are deliberately still ahead:
