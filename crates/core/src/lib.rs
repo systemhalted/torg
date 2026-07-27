@@ -8,3 +8,5 @@ pub mod search;
 pub mod structure;
 pub mod timestamp;
 pub mod view;
+
+pub use search::{find, matches_in_line, Match};
