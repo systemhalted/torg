@@ -158,6 +158,16 @@ impl View {
         self.clamp(doc);
     }
 
+    /// Place the caret at `(line, col)`, clamping the line into the buffer (same rule as
+    /// [`View::move_to_line`]) and the column into the target line (same rule as
+    /// [`View::move_end`]). Resets the goal column. Used to land on a search match and to
+    /// restore the origin position when a search is cancelled.
+    pub fn move_to(&mut self, doc: &Document, line: usize, col: usize) {
+        self.move_to_line(doc, line);
+        self.set_column(col);
+        self.clamp(doc);
+    }
+
     // ---- editing (mutate the document, then the cursor) -------------------
 
     /// Insert `ch` at the caret and step the caret past it. A `char` is one column
@@ -425,6 +435,17 @@ mod tests {
         assert_eq!((v.cursor_line(), v.cursor_column()), (2, 0));
         v.move_to_line(&doc, 999); // clamps to the phantom trailing line
         assert_eq!(v.cursor_line(), 3);
+    }
+
+    #[test]
+    fn move_to_places_the_cursor_at_line_and_column_clamped() {
+        let (doc, mut v) = fixture("short\na longer line\n");
+        v.move_to(&doc, 1, 9);
+        assert_eq!((v.cursor_line(), v.cursor_column()), (1, 9));
+        v.move_to(&doc, 0, 99); // clamps to the end of "short"
+        assert_eq!((v.cursor_line(), v.cursor_column()), (0, 5));
+        v.move_to(&doc, 99, 0); // clamps to the phantom trailing line
+        assert_eq!((v.cursor_line(), v.cursor_column()), (2, 0));
     }
 
     #[test]
