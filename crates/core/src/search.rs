@@ -62,12 +62,13 @@ pub fn find(
     let last = doc.line_count().saturating_sub(1);
     let (from_line, from_col) = (from.0.min(last), from.1);
 
-    let hit = |line: usize, bound: Option<(usize, bool)>| -> Option<Match> {
+    // On the anchor line the match must sit at-or-after (forward) / at-or-before
+    // (backward) `from_col`; swept lines have no bound.
+    let hit = |line: usize, bound: Option<usize>| -> Option<Match> {
         let cols = matches_in_line(&doc.line_text(line), query);
         let col = match bound {
-            // (col bound, at_or_after): filter relative to `from` on the anchor line.
-            Some((b, true)) => cols.into_iter().find(|&c| c >= b),
-            Some((b, false)) => cols.into_iter().rev().find(|&c| c <= b),
+            Some(b) if forward => cols.into_iter().find(|&c| c >= b),
+            Some(b) => cols.into_iter().rev().find(|&c| c <= b),
             None if forward => cols.first().copied(),
             None => cols.last().copied(),
         }?;
@@ -75,7 +76,7 @@ pub fn find(
     };
 
     if forward {
-        if let Some(m) = hit(from_line, Some((from_col, true))) {
+        if let Some(m) = hit(from_line, Some(from_col)) {
             return Some((m, false));
         }
         for line in from_line + 1..=last {
@@ -89,7 +90,7 @@ pub fn find(
             }
         }
     } else {
-        if let Some(m) = hit(from_line, Some((from_col, false))) {
+        if let Some(m) = hit(from_line, Some(from_col)) {
             return Some((m, false));
         }
         for line in (0..from_line).rev() {
@@ -189,5 +190,21 @@ mod tests {
         let d = doc("alpha\nomega");
         let (m, wrapped) = find(&d, "omega", (0, 0), true).unwrap();
         assert_eq!((m.line, m.col, wrapped), (1, 0, false));
+    }
+
+    #[test]
+    fn forward_wrap_back_onto_the_anchor_line_reports_wrapped() {
+        // Single line, only match before `from_col`: found via the wrap sweep.
+        let d = doc("alpha zzz");
+        let (m, wrapped) = find(&d, "alpha", (0, 3), true).unwrap();
+        assert_eq!((m.line, m.col, wrapped), (0, 0, true));
+    }
+
+    #[test]
+    fn backward_wrap_back_onto_the_anchor_line_reports_wrapped() {
+        // Single line, only match after `from_col`: found via the wrap sweep.
+        let d = doc("zzz alpha");
+        let (m, wrapped) = find(&d, "alpha", (0, 2), false).unwrap();
+        assert_eq!((m.line, m.col, wrapped), (0, 4, true));
     }
 }
