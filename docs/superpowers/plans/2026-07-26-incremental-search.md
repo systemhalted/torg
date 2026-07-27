@@ -780,7 +780,7 @@ Use the project verify skill (`.claude/skills/verify/SKILL.md`). Scenario:
 4. `Ctrl+F` (pre-filled) — assert it jumps back; `Enter`; cursor stays.
 5. Type `NEEDLE` into a fresh search — assert `Not found` (smart case).
 
-- [ ] **Step 4: Commit and open the PR**
+- [x] **Step 4: Commit and open the PR**
 
 ```bash
 git add docs/usage.md docs/guide.md README.md docs/superpowers/specs/2026-07-26-incremental-search-design.md
