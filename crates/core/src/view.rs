@@ -164,8 +164,8 @@ impl View {
     /// restore the origin position when a search is cancelled.
     pub fn move_to(&mut self, doc: &Document, line: usize, col: usize) {
         self.move_to_line(doc, line);
-        self.set_column(col);
-        self.clamp(doc);
+        let max = doc.line_len_chars(self.line);
+        self.set_column(col.min(max));
     }
 
     // ---- editing (mutate the document, then the cursor) -------------------
@@ -446,6 +446,14 @@ mod tests {
         assert_eq!((v.cursor_line(), v.cursor_column()), (0, 5));
         v.move_to(&doc, 99, 0); // clamps to the phantom trailing line
         assert_eq!((v.cursor_line(), v.cursor_column()), (2, 0));
+    }
+
+    #[test]
+    fn move_to_clamps_the_goal_column_not_just_the_cursor() {
+        let (doc, mut v) = fixture("short\na longer line\n");
+        v.move_to(&doc, 0, 99); // clamps to (0,5), and the goal must clamp too
+        v.move_down(&doc); // should land near column 5, not drift to line 1's full length (13)
+        assert_eq!((v.cursor_line(), v.cursor_column()), (1, 5));
     }
 
     #[test]
