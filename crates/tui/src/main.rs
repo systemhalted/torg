@@ -7,6 +7,9 @@
 mod action;
 mod app;
 mod buffer;
+// consumed by the help menu (next task)
+#[allow(dead_code)]
+mod commands;
 mod terminal;
 mod ui;
 mod viewport;
