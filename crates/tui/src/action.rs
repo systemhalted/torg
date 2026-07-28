@@ -49,6 +49,9 @@ pub enum Action {
     PriorityUp,
     PriorityDown,
     EditTags,
+    /// Toggle the checkbox on the cursor's list item (`Ctrl+Space`, mnemonic; `Alt+X`,
+    /// always-reachable fallback — see `key_to_action`'s NUL handling below).
+    ToggleCheckbox,
     // dates
     SetScheduled,
     SetDeadline,
@@ -98,6 +101,15 @@ pub fn key_to_action(key: KeyEvent) -> Option<Action> {
         KeyCode::Backspace => Some(Action::Backspace),
         KeyCode::Delete => Some(Action::Delete),
         KeyCode::Tab => Some(Action::ToggleFold),
+        // `Ctrl+Space`: in legacy (non-kitty) terminal parsing, the terminal sends a raw NUL
+        // byte for this chord, and crossterm's unix parser turns that into
+        // `KeyCode::Char(' ')` + `KeyModifiers::CONTROL` (see `parse.rs`'s `b'\0'` arm in
+        // crossterm 0.28), never `KeyCode::Null` — so the arm below is the one that actually
+        // fires. `KeyCode::Null` is kept as a defensive fallback: it is a real, distinct
+        // `KeyCode` variant that no current crossterm backend constructs, but a future
+        // backend (or another terminal library) delivering NUL that way should still toggle
+        // the checkbox rather than silently doing nothing.
+        KeyCode::Null => Some(Action::ToggleCheckbox),
         // Ctrl chords: file + structure commands.
         KeyCode::Char(c) if ctrl => match c {
             's' => Some(Action::Save),
@@ -114,6 +126,9 @@ pub fn key_to_action(key: KeyEvent) -> Option<Action> {
             // Backspace); `k` is the always-reliable fallback.
             'h' | 'k' => Some(Action::Help),
             'u' => Some(Action::Guide),
+            // Mnemonic for checkbox toggling; see the `KeyCode::Null` comment above for why
+            // this — not `Null` — is the arm that actually receives `Ctrl+Space` in practice.
+            ' ' => Some(Action::ToggleCheckbox),
             _ => None,
         },
         // Alt chords: buffer commands (echoing Ctrl+N/P's heading navigation), plus the
@@ -127,6 +142,9 @@ pub fn key_to_action(key: KeyEvent) -> Option<Action> {
             'd' => Some(Action::SetDeadline),
             '.' => Some(Action::InsertActiveTs),
             'i' => Some(Action::InsertInactiveTs),
+            // Always-reachable fallback for `Ctrl+Space`, which some terminals swallow
+            // entirely rather than delivering as NUL.
+            'x' => Some(Action::ToggleCheckbox),
             _ => None,
         },
         // Any other printable char (incl. Shift for capitals) is inserted.
@@ -254,7 +272,21 @@ mod tests {
 
     #[test]
     fn an_alt_modified_char_is_not_inserted() {
-        assert_eq!(key_to_action(alt('x')), None);
+        // 'x' is claimed as the checkbox-toggle fallback; an unbound letter still falls
+        // through to None rather than being typed.
+        assert_eq!(key_to_action(alt('z')), None);
+    }
+
+    #[test]
+    fn ctrl_space_alt_x_and_null_all_toggle_the_checkbox() {
+        // The mnemonic: legacy terminals deliver `Ctrl+Space` as a raw NUL byte, which
+        // crossterm's unix parser turns into `KeyCode::Char(' ')` + `CONTROL` (never
+        // `KeyCode::Null` — see the comment in `key_to_action`).
+        assert_eq!(key_to_action(ctrl(' ')), Some(Action::ToggleCheckbox));
+        // The always-reachable fallback.
+        assert_eq!(key_to_action(alt('x')), Some(Action::ToggleCheckbox));
+        // Defensive: if some backend ever hands us `KeyCode::Null` directly.
+        assert_eq!(key_to_action(press(KeyCode::Null)), Some(Action::ToggleCheckbox));
     }
 
     #[test]

@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use torg_core::document::Document;
+use torg_core::list::{indent_item, insert_item, item_at, toggle_checkbox};
 use torg_core::search::find;
 use torg_core::structure::{
     detect_format, is_valid_tag, next_heading, prev_heading, shift_timestamp, EditOutcome, Format,
@@ -488,17 +489,18 @@ impl App {
                     self.close_active_buffer();
                 }
             }
-            Action::PromoteHeading => self.structure_edit(|f, d, l| f.promote_heading(d, l)),
-            Action::DemoteHeading => self.structure_edit(|f, d, l| f.demote_heading(d, l)),
+            Action::PromoteHeading => self.indent_item_or_heading(true),
+            Action::DemoteHeading => self.indent_item_or_heading(false),
             Action::PromoteSubtree => self.structure_edit(|f, d, l| f.promote_subtree(d, l)),
             Action::DemoteSubtree => self.structure_edit(|f, d, l| f.demote_subtree(d, l)),
             Action::MoveSubtreeUp => self.structure_edit(|f, d, l| f.move_subtree_up(d, l)),
             Action::MoveSubtreeDown => self.structure_edit(|f, d, l| f.move_subtree_down(d, l)),
-            Action::InsertSibling => self.insert_sibling(false),
+            Action::InsertSibling => self.insert_item_or_sibling(),
             Action::InsertTodoSibling => self.insert_sibling(true),
             Action::PriorityUp => self.shift_date_or_priority(true),
             Action::PriorityDown => self.shift_date_or_priority(false),
             Action::EditTags => self.open_tags_prompt(),
+            Action::ToggleCheckbox => self.structure_edit(|f, d, l| toggle_checkbox(d, l, f)),
             Action::SetScheduled => self.open_date_prompt(DatePurpose::Scheduled),
             Action::SetDeadline => self.open_date_prompt(DatePurpose::Deadline),
             Action::InsertActiveTs => self.open_date_prompt(DatePurpose::InsertActive),
@@ -542,6 +544,50 @@ impl App {
             }
             Some(EditOutcome::NoOp(msg)) => self.status = msg.into(),
             None => self.structure_edit(|f, d, l| f.cycle_priority(d, l, up)),
+        }
+    }
+
+    /// `Alt+←`/`Alt+→` (`dedent` = `true` for `Alt+←`): on a list-item line, dedent/indent the
+    /// item; elsewhere, promote/demote the heading as before. The `shift_date_or_priority`
+    /// precedent for context-sensitive key overloading.
+    fn indent_item_or_heading(&mut self, dedent: bool) {
+        let line = self.buf().view.cursor_line();
+        let format = self.buf().format;
+        if item_at(&self.buf().doc, line, format).is_some() {
+            self.structure_edit(move |f, d, l| indent_item(d, l, f, dedent));
+        } else if dedent {
+            self.structure_edit(|f, d, l| f.promote_heading(d, l));
+        } else {
+            self.structure_edit(|f, d, l| f.demote_heading(d, l));
+        }
+    }
+
+    /// `Alt+Enter`: on a list-item line, insert a same-level item after this item's subtree;
+    /// elsewhere, insert a sibling heading (the plain form only — `InsertTodoSibling` stays
+    /// heading-only, matching the design's scope).
+    fn insert_item_or_sibling(&mut self) {
+        let line = self.buf().view.cursor_line();
+        let format = self.buf().format;
+        if item_at(&self.buf().doc, line, format).is_some() {
+            self.insert_list_item();
+        } else {
+            self.insert_sibling(false);
+        }
+    }
+
+    /// Insert a new list item and land the cursor at its content column.
+    fn insert_list_item(&mut self) {
+        let b = self.buf_mut();
+        match insert_item(&mut b.doc, b.view.cursor_line(), b.format) {
+            EditOutcome::Changed { cursor_line } => {
+                let b = self.buf_mut();
+                let col = item_at(&b.doc, cursor_line, b.format)
+                    .map(|item| item.content_col)
+                    .unwrap_or(0);
+                b.view.move_to(&b.doc, cursor_line, col);
+                self.reparse();
+            }
+            EditOutcome::NoOp(msg) => self.status = msg.into(),
         }
     }
 
@@ -1529,6 +1575,75 @@ mod tests {
         let mut app = single(Document::from_text("# A\n"), Some(PathBuf::from("x.md")));
         alt_key(&mut app, KeyCode::Right);
         assert_eq!(app.document().text(), "## A\n");
+    }
+
+    // ---- lists and checkboxes --------------------------------------------------
+
+    #[test]
+    fn ctrl_space_and_alt_x_toggle_a_checkbox_and_the_parent_cookie_in_one_keypress() {
+        let mut app = single(
+            Document::from_text("* top [0/2]\n- [ ] a\n- [ ] b\n"),
+            None,
+        );
+        press(&mut app, KeyCode::Down); // onto "- [ ] a"
+        ctrl(&mut app, ' ');
+        assert_eq!(
+            app.document().text(),
+            "* top [1/2]\n- [X] a\n- [ ] b\n"
+        );
+
+        // Alt+X reaches the same action for the other item.
+        let mut app2 = single(
+            Document::from_text("* top [0/2]\n- [ ] a\n- [ ] b\n"),
+            None,
+        );
+        press(&mut app2, KeyCode::Down);
+        press(&mut app2, KeyCode::Down); // onto "- [ ] b"
+        alt_key(&mut app2, KeyCode::Char('x'));
+        assert_eq!(
+            app2.document().text(),
+            "* top [1/2]\n- [ ] a\n- [X] b\n"
+        );
+    }
+
+    #[test]
+    fn toggling_a_plain_line_reports_no_checkbox() {
+        let mut app = single(Document::from_text("just prose\n"), None);
+        ctrl(&mut app, ' ');
+        assert_eq!(app.document().text(), "just prose\n");
+        assert_eq!(app.status(), "No checkbox here");
+    }
+
+    #[test]
+    fn alt_enter_on_an_item_inserts_one_and_lands_on_its_content_column() {
+        let mut app = single(Document::from_text("- [ ] a\n"), None);
+        alt_key(&mut app, KeyCode::Enter);
+        assert_eq!(app.document().text(), "- [ ] a\n- [ ] \n");
+        assert_eq!(app.view().cursor_line(), 1);
+        assert_eq!(app.view().cursor_column(), 6); // past "- [ ] "
+    }
+
+    #[test]
+    fn alt_right_indents_an_item_by_two_spaces() {
+        let mut app = single(Document::from_text("- a\n- b\n"), None);
+        press(&mut app, KeyCode::Down); // onto "- b"
+        alt_key(&mut app, KeyCode::Right);
+        assert_eq!(app.document().text(), "- a\n  - b\n");
+    }
+
+    #[test]
+    fn alt_left_at_top_level_on_an_item_reports_already_at_top_level() {
+        let mut app = single(Document::from_text("- a\n"), None);
+        alt_key(&mut app, KeyCode::Left);
+        assert_eq!(app.document().text(), "- a\n");
+        assert_eq!(app.status(), "Already at top level");
+    }
+
+    #[test]
+    fn alt_left_on_a_heading_still_promotes() {
+        let mut app = single(Document::from_text("** A\n"), None);
+        alt_key(&mut app, KeyCode::Left);
+        assert_eq!(app.document().text(), "* A\n");
     }
 
     #[test]

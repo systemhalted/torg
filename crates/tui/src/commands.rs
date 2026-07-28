@@ -90,6 +90,7 @@ fn requires_entry(action: &Action) -> bool {
         | Action::PriorityUp
         | Action::PriorityDown
         | Action::EditTags
+        | Action::ToggleCheckbox
         | Action::SetScheduled
         | Action::SetDeadline
         | Action::InsertActiveTs
@@ -122,6 +123,7 @@ pub static COMMANDS: &[CommandInfo] = &[
     CommandInfo { action: Action::PriorityUp, keys: "Shift+↑", name: "Priority up", description: "Raise the [#A]-style priority (or shift a timestamp field)", category: Category::Structure },
     CommandInfo { action: Action::PriorityDown, keys: "Shift+↓", name: "Priority down", description: "Lower the priority (or shift a timestamp field)", category: Category::Structure },
     CommandInfo { action: Action::EditTags, keys: "Ctrl+G", name: "Edit tags", description: "Edit the heading's tags in a prompt", category: Category::Structure },
+    CommandInfo { action: Action::ToggleCheckbox, keys: "Ctrl+Space", name: "Toggle checkbox", description: "Toggle the item's checkbox (Alt+X also works)", category: Category::Structure },
     // Dates
     CommandInfo { action: Action::SetScheduled, keys: "Alt+S", name: "Set SCHEDULED", description: "Set or edit the heading's SCHEDULED date (Org)", category: Category::Dates },
     CommandInfo { action: Action::SetDeadline, keys: "Alt+D", name: "Set DEADLINE", description: "Set or edit the heading's DEADLINE date (Org)", category: Category::Dates },
@@ -174,6 +176,7 @@ mod tests {
             Action::PriorityUp,
             Action::PriorityDown,
             Action::EditTags,
+            Action::ToggleCheckbox,
             Action::SetScheduled,
             Action::SetDeadline,
             Action::InsertActiveTs,
