@@ -131,13 +131,24 @@ Switch to the next / previous buffer.
 .BR Ctrl+B ", " Ctrl+W
 Buffer list; close the current buffer.
 .TP
-.BR Ctrl+H ", " Ctrl+U
-Open the quick key reference / the full guide in the editor.
+.B Ctrl+H
+Open a categorized help menu:
+.BR Left / Right " or " Tab
+switches category,
+.BR Up / Down
+selects a command,
+.B Enter
+runs it, and
+.B Esc
+closes the menu.
 .RB ( Ctrl+K
-also opens the reference, for terminals that send
+also opens it, for terminals that send
 .B Ctrl+H
 as
 .BR Backspace .)
+.TP
+.B Ctrl+U
+Open the full guide in the editor.
 .TP
 .B Ctrl+Q
 Quit (asks before discarding unsaved changes).

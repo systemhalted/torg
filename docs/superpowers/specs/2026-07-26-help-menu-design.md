@@ -1,6 +1,6 @@
 # Categorized help menu
 
-Date: 2026-07-26 · Status: approved design, pre-implementation
+Date: 2026-07-26 · Status: approved design, implemented
 Reference behavior: none in Org; the design follows torg's own `Mode::BufferList` overlay
 pattern.
 
@@ -28,6 +28,10 @@ stays a doc buffer).
   Structure · Dates · Search · Buffers · Help** — and the active category's commands
   listed below as `key  name — description`, one per line, with the selected row
   highlighted. A footer line shows `←/→ category · ↑/↓ select · Enter run · Esc close`.
+  **Deviation, locked in:** the shipped menu has **seven** categories, not eight — File,
+  Navigate, Structure, Dates, Search, Buffers, Help. Edit is dropped: the spec's own
+  exclusion list (`InsertChar`, `Newline`, `Backspace`, `Delete`, plain cursor motion) leaves
+  it with no commands to hold, so a category tab for it would render empty.
 - `←`/`→` (and `Tab`) switch category, wrapping; `↑`/`↓` move the selection, wrapping;
   selection resets to the first row on category switch.
 - `Enter` closes the menu and dispatches the selected command exactly as if its chord had
@@ -36,6 +40,10 @@ stays a doc buffer).
 - `Esc`, `Ctrl+H`, `Ctrl+K` close the menu with no action.
 - The menu never scrolls the buffer behind it; on tiny terminals the overlay clamps to the
   frame the way the buffer list does.
+  **Deviation, locked in:** the menu isn't a floating overlay — it replaces the document body
+  while `Mode::HelpMenu` is active, the same body-replacement pattern `Mode::BufferList` already
+  uses (`draw_buffer_list`/`draw_help_menu` in `ui.rs`). torg has no floating-overlay machinery
+  to draw on top of the buffer, so this reuses what already exists instead of building one.
 
 ## Design
 
@@ -64,7 +72,14 @@ Page/heading motion but raw typing keys stay out of the menu.
 **Drift guard:** a test walks every `Action` variant (a small exhaustive `match` that
 fails to compile when a variant is added) and asserts it is either in `COMMANDS` or in the
 explicit excluded list. Adding an action without deciding its help entry becomes a compile
-or test failure.
+or test failure. **Deviation, as-built, worth recording precisely:** the exhaustive
+`requires_entry` match is what forces a decision on every *new* Action variant — that half of
+the guard is automatic. But coverage of the *included* side (does `COMMANDS` actually have an
+entry for every action `requires_entry` says it must?) is checked against a second, hand-
+maintained list, `menu_actions()`, in `commands.rs`'s test module. `requires_entry` returning
+`true` for an action doesn't by itself guarantee `COMMANDS` contains it; that guarantee only
+holds for actions also listed in `menu_actions()`. Adding an action to `requires_entry`'s
+`true` arm without also adding it to `menu_actions()` and to `COMMANDS` will not be caught.
 
 ### TUI wiring
 

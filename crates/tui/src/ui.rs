@@ -80,7 +80,7 @@ fn help_menu_lines(category: usize, selected: usize, _width: usize) -> Vec<Line<
     lines.push(Line::from(tabs));
     lines.push(Line::raw(""));
     for (i, cmd) in commands_in(Category::ALL[category]).iter().enumerate() {
-        let text = format!(" {:<14} {:<24} {}", cmd.keys, cmd.name, cmd.description);
+        let text = format!(" {:<14} {:<26} {}", cmd.keys, cmd.name, cmd.description);
         let style = if i == selected {
             Style::default().add_modifier(Modifier::REVERSED)
         } else {
