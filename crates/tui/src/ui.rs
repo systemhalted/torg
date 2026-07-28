@@ -10,6 +10,7 @@ use ratatui::Frame;
 use torg_core::timestamp::find_timestamps;
 
 use crate::app::{App, DatePurpose, Mode};
+use crate::commands::{commands_in, Category};
 
 /// The status-line prefix for a date prompt.
 fn date_prompt_label(purpose: DatePurpose) -> &'static str {
@@ -29,6 +30,9 @@ pub fn render(frame: &mut Frame, app: &App) {
 
     let cursor = if let Mode::BufferList { selected } = app.mode() {
         draw_buffer_list(frame, app, body, *selected);
+        None
+    } else if let Mode::HelpMenu { category, selected } = app.mode() {
+        draw_help_menu(frame, body, *category, *selected);
         None
     } else {
         draw_body(frame, app, body)
@@ -55,6 +59,43 @@ fn draw_buffer_list(frame: &mut Frame, app: &App, body: Rect, selected: usize) {
             Line::styled(text, style)
         })
         .collect();
+    frame.render_widget(Paragraph::new(lines), body);
+}
+
+/// The help menu's lines: a tab row (one span per category, the active one reversed), a blank
+/// line, then one row per command in the active category (the selected row reversed). Pure so
+/// tests can call it without a terminal.
+fn help_menu_lines(category: usize, selected: usize, _width: usize) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    let mut tabs: Vec<Span> = Vec::new();
+    for (i, cat) in Category::ALL.iter().enumerate() {
+        let style = if i == category {
+            Style::default().add_modifier(Modifier::REVERSED)
+        } else {
+            Style::default()
+        };
+        tabs.push(Span::styled(format!(" {} ", cat.title()), style));
+        tabs.push(Span::raw(" "));
+    }
+    lines.push(Line::from(tabs));
+    lines.push(Line::raw(""));
+    for (i, cmd) in commands_in(Category::ALL[category]).iter().enumerate() {
+        let text = format!(" {:<14} {:<24} {}", cmd.keys, cmd.name, cmd.description);
+        let style = if i == selected {
+            Style::default().add_modifier(Modifier::REVERSED)
+        } else {
+            Style::default()
+        };
+        lines.push(Line::styled(text, style));
+    }
+    lines
+}
+
+/// The help menu: category tabs, then the active category's commands, the selected one
+/// reversed. Replaces the document body while [`Mode::HelpMenu`] is active — the same
+/// body-replacement pattern as [`draw_buffer_list`].
+fn draw_help_menu(frame: &mut Frame, body: Rect, category: usize, selected: usize) {
+    let lines = help_menu_lines(category, selected, body.width as usize);
     frame.render_widget(Paragraph::new(lines), body);
 }
 
@@ -270,10 +311,8 @@ fn status_text(app: &App) -> String {
         Mode::BufferList { .. } => {
             return " Buffers — ↑/↓ or 1-9 select · Enter switch · Esc cancel ".to_string()
         }
-        // Task 3 renders the menu body; the footer hint lands now so the mode is fully
-        // usable (if not yet pretty) as soon as it exists.
         Mode::HelpMenu { .. } => {
-            return "←/→ category · ↑/↓ select · Enter run · Esc close".to_string()
+            return " ←/→ category · ↑/↓ select · Enter run · Esc close ".to_string()
         }
         Mode::ConfirmClose => {
             let (name, _) = app.buffer_labels().swap_remove(app.active_index());
@@ -307,6 +346,18 @@ mod tests {
     use super::*;
     use crate::buffer::Buffer;
     use torg_core::document::Document;
+
+    #[test]
+    fn help_rows_show_tabs_rows_and_selection() {
+        let lines = help_menu_lines(1, 0, 80); // category 1 = Navigate, row 0 selected
+        let tabs = &lines[0];
+        let tab_text: String = tabs.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(tab_text.contains("File") && tab_text.contains("Navigate"));
+        // Navigate's active tab styled differently from File's.
+        assert_ne!(tabs.spans[0].style, tabs.spans[2].style);
+        let first_row: String = lines[2].spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(first_row.contains("Ctrl+N") && first_row.contains("Next heading"));
+    }
 
     #[test]
     fn expand_tabs_advances_to_the_next_tab_stop() {

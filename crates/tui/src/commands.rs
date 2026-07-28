@@ -49,6 +49,10 @@ pub struct CommandInfo {
 
 /// Whether an [`Action`] must appear in [`COMMANDS`]. Exhaustive on purpose: adding an
 /// `Action` variant fails compilation here until someone decides its help-menu fate.
+///
+/// Only exercised by tests below — it's a compile-time drift guard, not runtime logic, so it
+/// has no caller outside `#[cfg(test)]`.
+#[allow(dead_code)]
 fn requires_entry(action: &Action) -> bool {
     match action {
         // Raw typing and plain cursor motion stay out of the menu by design.

@@ -892,7 +892,8 @@ impl App {
             return;
         };
         let cat_count = Category::ALL.len();
-        let rows = commands_in(Category::ALL[*category]).len();
+        let entries = commands_in(Category::ALL[*category]);
+        let rows = entries.len();
         match key.code {
             KeyCode::Esc => self.mode = Mode::Edit,
             KeyCode::Char('h') | KeyCode::Char('k') if ctrl => self.mode = Mode::Edit,
@@ -907,7 +908,7 @@ impl App {
             KeyCode::Up => *selected = (*selected + rows - 1) % rows,
             KeyCode::Down => *selected = (*selected + 1) % rows,
             KeyCode::Enter => {
-                let action = commands_in(Category::ALL[*category])[*selected].action;
+                let action = entries[*selected].action;
                 self.mode = Mode::Edit;
                 self.apply(action);
             }
@@ -1703,6 +1704,30 @@ mod tests {
     }
 
     #[test]
+    fn help_menu_navigation_wraps_forward_from_the_last_category_and_row() {
+        let mut app = single(Document::from_text("* work\n"), None);
+        ctrl(&mut app, 'h');
+        let last_cat = Category::ALL.len() - 1;
+        for _ in 0..last_cat {
+            press(&mut app, KeyCode::Right); // walk to the last category
+        }
+        press(&mut app, KeyCode::Right); // Right from the last category wraps to 0
+        assert!(matches!(app.mode(), Mode::HelpMenu { category, selected }
+            if *category == 0 && *selected == 0));
+
+        for _ in 0..last_cat {
+            press(&mut app, KeyCode::Tab); // Tab also switches category; walk back to the last
+        }
+        let last_row = commands_in(Category::ALL[last_cat]).len() - 1;
+        for _ in 0..last_row {
+            press(&mut app, KeyCode::Down); // walk to the last row
+        }
+        assert!(matches!(app.mode(), Mode::HelpMenu { selected, .. } if *selected == last_row));
+        press(&mut app, KeyCode::Down); // Down from the last row wraps to 0
+        assert!(matches!(app.mode(), Mode::HelpMenu { selected, .. } if *selected == 0));
+    }
+
+    #[test]
     fn enter_runs_the_selected_command() {
         let mut app = single(Document::from_text("* work\n"), None);
         ctrl(&mut app, 'h');
@@ -1725,6 +1750,9 @@ mod tests {
         assert_eq!(app.mode(), &Mode::Edit);
         ctrl(&mut app, 'h');
         ctrl(&mut app, 'h');
+        assert_eq!(app.mode(), &Mode::Edit);
+        ctrl(&mut app, 'h');
+        ctrl(&mut app, 'k'); // Ctrl+K also closes the menu
         assert_eq!(app.mode(), &Mode::Edit);
         assert_eq!(app.document().text(), text_before);
     }
