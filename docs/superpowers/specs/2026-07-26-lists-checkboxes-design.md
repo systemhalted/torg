@@ -1,6 +1,6 @@
 # Plain lists, checkboxes, and statistics cookies (M4)
 
-Date: 2026-07-26 · Status: draft for review, pre-implementation
+Date: 2026-07-26 · Status: approved design, pre-implementation
 Reference semantics: the Org manual — Plain Lists and Checkboxes chapters
 (https://orgmode.org/org.html).
 
