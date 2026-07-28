@@ -1,6 +1,6 @@
 # Categorized help menu
 
-Date: 2026-07-26 · Status: draft for review, pre-implementation
+Date: 2026-07-26 · Status: approved design, pre-implementation
 Reference behavior: none in Org; the design follows torg's own `Mode::BufferList` overlay
 pattern.
 
