@@ -10,5 +10,8 @@ pub mod structure;
 pub mod timestamp;
 pub mod view;
 
-pub use list::{item_at, toggle_checkbox, update_cookies, Bullet, CheckState, ListItem};
+pub use list::{
+    indent_item, insert_item, item_at, toggle_checkbox, update_cookies, Bullet, CheckState,
+    ListItem,
+};
 pub use search::{find, matches_in_line, Match};

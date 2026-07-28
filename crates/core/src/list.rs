@@ -378,6 +378,165 @@ fn top_level_checkbox_counts(
     (checked, total)
 }
 
+/// Status text for [`insert_item`]/[`indent_item`] off a list item entirely.
+const NOT_ON_ITEM: &str = "Not on a list item";
+
+/// The line of the last item in the subtree rooted at the item at `line` within `items`: the
+/// deepest-nested descendant's line, or `line` itself if it has no children. Descendants are
+/// every item after it whose indent stays strictly greater than its own, stopping at the
+/// first item back down at or above that indent (same span `direct_children` scans, but
+/// walked to its end rather than filtered to the minimum indent).
+fn subtree_last_line(items: &[ListItem], line: usize) -> usize {
+    let Some(idx) = items.iter().position(|it| it.line == line) else {
+        return line;
+    };
+    let indent = items[idx].indent;
+    items[idx + 1..]
+        .iter()
+        .take_while(|it| it.indent > indent)
+        .last()
+        .map_or(line, |it| it.line)
+}
+
+/// The lines of every FOLLOWING same-level sibling of the item at `line` within `items`:
+/// later items at exactly its indent, skipping over any deeper (child) items in between,
+/// stopping at the first item back up at a strictly smaller indent (or the end of `items`).
+fn following_same_level_siblings(items: &[ListItem], line: usize) -> Vec<usize> {
+    let Some(idx) = items.iter().position(|it| it.line == line) else {
+        return Vec::new();
+    };
+    let indent = items[idx].indent;
+    let mut siblings = Vec::new();
+    for it in &items[idx + 1..] {
+        if it.indent < indent {
+            break;
+        }
+        if it.indent == indent {
+            siblings.push(it.line);
+        }
+    }
+    siblings
+}
+
+/// Rewrite an ordered bullet's number in place, leaving the delimiter (`.`/`)`) and
+/// everything else on the line untouched. `indent` is the item's own leading-whitespace
+/// width — the digits start exactly there, right after the bullet's indentation.
+fn rewrite_ordered_number(doc: &mut Document, line: usize, indent: usize, new_number: usize) {
+    let raw = doc.line_text(line);
+    let text = raw.strip_suffix('\n').unwrap_or(&raw);
+    let chars: Vec<char> = text.chars().collect();
+    let digit_len = chars[indent..].iter().take_while(|c| c.is_ascii_digit()).count();
+    let base = doc.line_to_char(line);
+    doc.remove(base + indent..base + indent + digit_len);
+    doc.insert(base + indent, &new_number.to_string());
+}
+
+/// Recompute the cookie on `parent_line` for its OWN direct children, as they stand right
+/// now — unlike [`update_cookies`], which recomputes the ancestors of a given line, this
+/// targets one specific item as the parent whose child count changed even though it may no
+/// longer be (or newly become) an ancestor of the line that was actually edited. Used by
+/// [`indent_item`] to keep an item's former parent's cookie in sync after the item moves to
+/// a new parent.
+fn recompute_parent_cookie(doc: &mut Document, parent_line: usize, format: Format) {
+    let fences = fence_flags_for(doc, format);
+    let items = region_items(doc, parent_line, format, fences.as_deref());
+    let (checked, total) = direct_children(&items, parent_line);
+    rewrite_cookies_on_line(doc, parent_line, checked, total);
+}
+
+/// Insert a new same-level item after `line`'s item's entire subtree (its children stay put
+/// under it): a fresh `[ ]` checkbox if `line`'s item has one, the next number (following
+/// same-level siblings renumbered +1) if it's ordered, no bullet rewriting otherwise. A no-op
+/// off a list item. Ends by recomputing cookies from the new item's line — which is also
+/// where the cursor lands, so the TUI can read its `content_col` via `item_at`.
+pub fn insert_item(doc: &mut Document, line: usize, format: Format) -> EditOutcome {
+    let Some(item) = item_at(doc, line, format) else {
+        return EditOutcome::NoOp(NOT_ON_ITEM);
+    };
+
+    let fences = fence_flags_for(doc, format);
+    let items = region_items(doc, line, format, fences.as_deref());
+
+    // Renumber following ordered siblings first, while line numbers are still pre-insert —
+    // these are same-line digit-width edits, so they don't shift anyone's line number.
+    if let Bullet::Ordered { .. } = item.bullet {
+        for sib_line in following_same_level_siblings(&items, line) {
+            if let Some(sib) = items.iter().find(|it| it.line == sib_line) {
+                if let Bullet::Ordered { number: sib_number, .. } = sib.bullet {
+                    rewrite_ordered_number(doc, sib_line, sib.indent, sib_number + 1);
+                }
+            }
+        }
+    }
+
+    let target_line = subtree_last_line(&items, line) + 1;
+
+    let raw = doc.line_text(line);
+    let text = raw.strip_suffix('\n').unwrap_or(&raw);
+    let indent_str: String = text.chars().take(item.indent).collect();
+    let bullet_str = match item.bullet {
+        Bullet::Dash => "- ".to_string(),
+        Bullet::Plus => "+ ".to_string(),
+        Bullet::Star => "* ".to_string(),
+        Bullet::Ordered { number, paren } => {
+            format!("{}{} ", number + 1, if paren { ')' } else { '.' })
+        }
+    };
+    let checkbox_str = if item.checkbox.is_some() { "[ ] " } else { "" };
+    let new_line_text = format!("{indent_str}{bullet_str}{checkbox_str}");
+
+    let (at, prefix) = if target_line < doc.line_count() {
+        (doc.line_to_char(target_line), "")
+    } else {
+        let end = doc.text().chars().count();
+        let needs_nl = end > 0 && !doc.text().ends_with('\n');
+        (end, if needs_nl { "\n" } else { "" })
+    };
+    doc.insert(at, &format!("{prefix}{new_line_text}\n"));
+    let new_line = doc.char_to_line(at + prefix.chars().count());
+
+    update_cookies(doc, new_line, format);
+    EditOutcome::Changed { cursor_line: new_line }
+}
+
+/// Indent (`dedent: false`) or dedent (`true`) the item line at `line` by one two-space unit
+/// — the item line only, its children stay exactly as written. Bullets are never rewritten.
+/// A no-op off a list item; dedenting at indent 0 refuses ("Already at top level"), as does
+/// dedenting an indented Org `*` item down to column 0, which would turn it into a heading
+/// ("Would become a heading"). Ends by recomputing cookies: the new ancestor chain (and the
+/// enclosing heading) via [`update_cookies`], plus the item's FORMER parent's cookie
+/// directly, since that parent may no longer be an ancestor of `line` at all.
+pub fn indent_item(doc: &mut Document, line: usize, format: Format, dedent: bool) -> EditOutcome {
+    let Some(item) = item_at(doc, line, format) else {
+        return EditOutcome::NoOp(NOT_ON_ITEM);
+    };
+
+    let fences = fence_flags_for(doc, format);
+    let items_before = region_items(doc, line, format, fences.as_deref());
+    let old_parent_line = parent_chain(&items_before, line).into_iter().next();
+
+    if dedent {
+        if item.indent == 0 {
+            return EditOutcome::NoOp("Already at top level");
+        }
+        let remove = item.indent.min(2);
+        if format == Format::Org && item.bullet == Bullet::Star && item.indent - remove == 0 {
+            return EditOutcome::NoOp("Would become a heading");
+        }
+        let base = doc.line_to_char(line);
+        doc.remove(base..base + remove);
+    } else {
+        let base = doc.line_to_char(line);
+        doc.insert(base, "  ");
+    }
+
+    update_cookies(doc, line, format);
+    if let Some(old_parent) = old_parent_line {
+        recompute_parent_cookie(doc, old_parent, format);
+    }
+    EditOutcome::Changed { cursor_line: line }
+}
+
 /// Rewrite every `[n/m]` / `[p%]` (including the unfilled `[/]` / `[%]` forms) cookie token
 /// found in `line`'s text to reflect `(checked, total)`; a no-op if the line has none, so a
 /// cookie is never inserted. Percentages truncate (`100 * checked / total`); `total == 0`
@@ -750,5 +909,145 @@ mod tests {
         let mut d = doc("* H [3/5]\nplain text, no items\n");
         update_cookies(&mut d, 0, Format::Org);
         assert_eq!(d.text(), "* H [0/0]\nplain text, no items\n");
+    }
+
+    // ---- insert_item ----------------------------------------------------------------
+
+    #[test]
+    fn insert_after_a_childless_item_adds_a_bare_bullet_below_it() {
+        let mut d = doc("- a\n");
+        let outcome = insert_item(&mut d, 0, Format::Org);
+        assert_eq!(outcome, EditOutcome::Changed { cursor_line: 1 });
+        assert_eq!(d.text(), "- a\n- \n");
+    }
+
+    #[test]
+    fn insert_after_item_with_children_lands_after_the_whole_subtree() {
+        let mut d = doc("- a\n  - a1\n  - a2\n- b\n");
+        let outcome = insert_item(&mut d, 0, Format::Org);
+        assert_eq!(outcome, EditOutcome::Changed { cursor_line: 3 });
+        assert_eq!(d.text(), "- a\n  - a1\n  - a2\n- \n- b\n");
+    }
+
+    #[test]
+    fn insert_after_checkbox_item_gives_the_new_item_a_fresh_unchecked_box() {
+        let mut d = doc("- [X] a\n");
+        let outcome = insert_item(&mut d, 0, Format::Org);
+        assert_eq!(outcome, EditOutcome::Changed { cursor_line: 1 });
+        assert_eq!(d.text(), "- [X] a\n- [ ] \n");
+        // The new item's own content_col matches the checkbox-item convention.
+        let new_item = item_at(&d, 1, Format::Org).unwrap();
+        assert_eq!(new_item.checkbox, Some(CheckState::Unchecked));
+        assert_eq!(new_item.content_col, 6);
+    }
+
+    #[test]
+    fn insert_after_ordered_item_renumbers_following_siblings() {
+        let mut d = doc("1. a\n2. b\n3. c\n");
+        let outcome = insert_item(&mut d, 0, Format::Org);
+        assert_eq!(outcome, EditOutcome::Changed { cursor_line: 1 });
+        assert_eq!(d.text(), "1. a\n2. \n3. b\n4. c\n");
+    }
+
+    #[test]
+    fn insert_after_ordered_item_preserves_paren_style() {
+        let mut d = doc("1) a\n2) b\n");
+        let outcome = insert_item(&mut d, 0, Format::Org);
+        assert_eq!(outcome, EditOutcome::Changed { cursor_line: 1 });
+        assert_eq!(d.text(), "1) a\n2) \n3) b\n");
+    }
+
+    #[test]
+    fn insert_at_end_of_buffer_without_trailing_newline_still_works() {
+        let mut d = doc("- a");
+        let outcome = insert_item(&mut d, 0, Format::Org);
+        assert_eq!(outcome, EditOutcome::Changed { cursor_line: 1 });
+        assert_eq!(d.text(), "- a\n- \n");
+    }
+
+    #[test]
+    fn insert_on_a_non_item_line_is_a_noop() {
+        let mut d = doc("just prose\n");
+        let outcome = insert_item(&mut d, 0, Format::Org);
+        assert_eq!(outcome, EditOutcome::NoOp(NOT_ON_ITEM));
+        assert_eq!(d.text(), "just prose\n");
+    }
+
+    #[test]
+    fn insert_recomputes_the_parent_cookie_for_the_new_sibling() {
+        // Inserting after "a" (child of "top") adds a new unchecked direct child of "top",
+        // so [1/2] becomes [1/3] even though the edit itself targeted a grandchild line.
+        let mut d = doc("- top [1/2]\n  - [X] a\n  - [ ] b\n");
+        let outcome = insert_item(&mut d, 1, Format::Org);
+        assert_eq!(outcome, EditOutcome::Changed { cursor_line: 2 });
+        assert_eq!(d.text(), "- top [1/3]\n  - [X] a\n  - [ ] \n  - [ ] b\n");
+    }
+
+    // ---- indent_item ------------------------------------------------------------------
+
+    #[test]
+    fn indent_adds_two_spaces_to_the_item_line_only() {
+        let mut d = doc("- a\n- b\n  - b1\n");
+        let outcome = indent_item(&mut d, 1, Format::Org, false);
+        assert_eq!(outcome, EditOutcome::Changed { cursor_line: 1 });
+        // "b1"'s own line text is untouched, even though it's now a sibling of "b" rather
+        // than a child (nesting is purely a consequence of relative indentation).
+        assert_eq!(d.text(), "- a\n  - b\n  - b1\n");
+    }
+
+    #[test]
+    fn dedent_removes_two_spaces() {
+        let mut d = doc("- a\n  - b\n");
+        let outcome = indent_item(&mut d, 1, Format::Org, true);
+        assert_eq!(outcome, EditOutcome::Changed { cursor_line: 1 });
+        assert_eq!(d.text(), "- a\n- b\n");
+    }
+
+    #[test]
+    fn dedent_at_top_level_is_a_noop() {
+        let mut d = doc("- a\n");
+        let outcome = indent_item(&mut d, 0, Format::Org, true);
+        assert_eq!(outcome, EditOutcome::NoOp("Already at top level"));
+        assert_eq!(d.text(), "- a\n");
+    }
+
+    #[test]
+    fn dedenting_an_indented_org_star_item_to_column_zero_refuses() {
+        // " * item" dedented would put "*" at column 0 — a heading, not a bullet.
+        let mut d = doc(" * item\n");
+        let outcome = indent_item(&mut d, 0, Format::Org, true);
+        assert_eq!(outcome, EditOutcome::NoOp("Would become a heading"));
+        assert_eq!(d.text(), " * item\n");
+    }
+
+    #[test]
+    fn indent_and_dedent_never_rewrite_the_bullet() {
+        let mut d = doc("1. a\n2. b\n");
+        indent_item(&mut d, 1, Format::Org, false);
+        assert_eq!(d.text(), "1. a\n  2. b\n");
+    }
+
+    #[test]
+    fn indent_on_a_non_item_line_is_a_noop() {
+        let mut d = doc("just prose\n");
+        let outcome = indent_item(&mut d, 0, Format::Org, false);
+        assert_eq!(outcome, EditOutcome::NoOp(NOT_ON_ITEM));
+        assert_eq!(d.text(), "just prose\n");
+    }
+
+    #[test]
+    fn dedent_reassigns_an_item_to_a_new_parent_and_recomputes_both_cookies() {
+        let mut d = doc("- A [0/0]\n  - B [1/1]\n    - [X] c\n- D\n");
+        let outcome = indent_item(&mut d, 2, Format::Org, true); // dedent "c"
+        assert_eq!(outcome, EditOutcome::Changed { cursor_line: 2 });
+        assert_eq!(d.text(), "- A [1/1]\n  - B [0/0]\n  - [X] c\n- D\n");
+    }
+
+    #[test]
+    fn indenting_a_top_level_item_also_updates_the_heading_cookie() {
+        let mut d = doc("* H [0/2]\n- [ ] a\n- [ ] b\n");
+        let outcome = indent_item(&mut d, 2, Format::Org, false); // indent "b" under "a"
+        assert_eq!(outcome, EditOutcome::Changed { cursor_line: 2 });
+        assert_eq!(d.text(), "* H [0/1]\n- [ ] a\n  - [ ] b\n");
     }
 }
