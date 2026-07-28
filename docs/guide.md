@@ -14,8 +14,11 @@ Markdown** examples. Where there's no pairing, the feature works identically in 
 
 > This is the narrative walkthrough. For a terse one-screen key reference, see
 > [`usage.md`](usage.md); for the project's design, see [`architecture.md`](architecture.md).
-> You can also read this guide **inside torg** — press `Ctrl+U` (and `Ctrl+H` for the quick
-> reference).
+> You can also read this guide **inside torg** — press `Ctrl+U`. Press `Ctrl+H` (or `Ctrl+K`)
+> instead for a categorized help menu: `←`/`→` or `Tab` moves between categories, `↑`/`↓`
+> moves the selection, `Enter` runs the selected command, and `Esc` closes the menu. Since
+> `Enter` runs the command directly, it also gets you to a chord your terminal swallows before
+> torg ever sees it.
 
 ## Table of contents
 
@@ -200,10 +203,11 @@ The bottom row is the **status line**. In normal editing it reads, left to right
 
 - **`[2/3]`** — the **buffer position**: you're on buffer 2 of 2… of *3* open. It appears only
   when more than one buffer is open, and disappears again once you're down to a single file.
-  (Opening the in-editor help with `Ctrl+H`/`Ctrl+U` adds a buffer, which is a common reason
-  to suddenly see `[2/2]`.)
-- **name** — the file's name, `[No Name]` for an untitled buffer, or a label like
-  `*Quick reference*` / `*torg guide*` for the help buffers.
+  (Opening the guide with `Ctrl+U` adds a buffer, which is a common reason to suddenly see
+  `[2/2]`. `Ctrl+H`'s help menu doesn't add one — it replaces the view in place, the same way
+  the buffer list does, and leaves it the moment you close the menu.)
+- **name** — the file's name, `[No Name]` for an untitled buffer, or `*torg guide*` for the
+  guide buffer.
 - **`*`** — shown when the buffer has unsaved changes.
 - **`line:col`** — the cursor's position, both counting from 1.
 - **transient message** — brief feedback like `Saved`, `Opened notes.org`, `New file: x.org`,

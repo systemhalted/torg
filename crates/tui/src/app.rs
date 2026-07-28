@@ -20,6 +20,7 @@ use torg_core::view::View;
 
 use crate::action::{key_to_action, Action};
 use crate::buffer::Buffer;
+use crate::commands::{commands_in, Category};
 use crate::viewport::viewport_top;
 
 /// What the editor is doing right now. In the prompt modes the keyboard drives the
@@ -36,6 +37,9 @@ pub enum Mode {
     EditTags { input: String },
     /// The buffer list is open; `selected` is the highlighted entry.
     BufferList { selected: usize },
+    /// The help menu is open; `category` indexes [`crate::commands::Category::ALL`], `selected`
+    /// a row within that category's commands.
+    HelpMenu { category: usize, selected: usize },
     /// Asking whether to close the active (unsaved) buffer: `y` discards, `n`/Esc cancels.
     ConfirmClose,
     /// Asking whether to quit despite unsaved buffers: `y` quits, `n`/Esc cancels.
@@ -392,6 +396,7 @@ impl App {
             | Mode::EditTags { .. }
             | Mode::DatePrompt { .. } => self.handle_prompt_key(key),
             Mode::BufferList { .. } => self.handle_bufferlist_key(key),
+            Mode::HelpMenu { .. } => self.handle_help_key(key),
             Mode::ConfirmClose | Mode::ConfirmQuit => self.handle_confirm_key(key),
             Mode::Search { .. } => self.handle_search_key(key),
         }
@@ -498,14 +503,19 @@ impl App {
             Action::SetDeadline => self.open_date_prompt(DatePurpose::Deadline),
             Action::InsertActiveTs => self.open_date_prompt(DatePurpose::InsertActive),
             Action::InsertInactiveTs => self.open_date_prompt(DatePurpose::InsertInactive),
-            Action::Help => self.open_doc("*Quick reference*", include_str!("../../../docs/usage.md")),
+            Action::Help => {
+                self.mode = Mode::HelpMenu {
+                    category: 0,
+                    selected: 0,
+                }
+            }
             Action::Guide => self.open_doc("*torg guide*", include_str!("../../../docs/guide.md")),
             Action::Find => self.open_search(),
         }
     }
 
     /// Open a read-through documentation buffer named `name` holding `text` (switching to it if
-    /// it's already open). Used for the in-editor quick reference and guide.
+    /// it's already open). Used for the in-editor guide.
     fn open_doc(&mut self, name: &str, text: &str) {
         if let Some(i) = self
             .buffers
@@ -864,6 +874,43 @@ impl App {
                     self.mode = Mode::Edit;
                     self.switch_to(index);
                 }
+            }
+            _ => {}
+        }
+    }
+
+    /// The help menu: `←/→`/`Tab` switch category (wrapping, selection resets to 0), `↑/↓` move
+    /// the selection (wrapping within the category), `Enter` runs the selected command through
+    /// the normal [`App::apply`] dispatch — identical to pressing its chord — and `Esc`/`Ctrl+H`/
+    /// `Ctrl+K` close the menu.
+    fn handle_help_key(&mut self, key: KeyEvent) {
+        if key.kind != KeyEventKind::Press {
+            return;
+        }
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let Mode::HelpMenu { category, selected } = &mut self.mode else {
+            return;
+        };
+        let cat_count = Category::ALL.len();
+        let entries = commands_in(Category::ALL[*category]);
+        let rows = entries.len();
+        match key.code {
+            KeyCode::Esc => self.mode = Mode::Edit,
+            KeyCode::Char('h') | KeyCode::Char('k') if ctrl => self.mode = Mode::Edit,
+            KeyCode::Left => {
+                *category = (*category + cat_count - 1) % cat_count;
+                *selected = 0;
+            }
+            KeyCode::Right | KeyCode::Tab => {
+                *category = (*category + 1) % cat_count;
+                *selected = 0;
+            }
+            KeyCode::Up => *selected = (*selected + rows - 1) % rows,
+            KeyCode::Down => *selected = (*selected + 1) % rows,
+            KeyCode::Enter => {
+                let action = entries[*selected].action;
+                self.mode = Mode::Edit;
+                self.apply(action);
             }
             _ => {}
         }
@@ -1612,21 +1659,102 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_k_and_ctrl_u_open_named_doc_buffers_without_duplicating() {
+    fn ctrl_k_opens_the_help_menu_and_ctrl_u_opens_the_guide_without_duplicating() {
         let mut app = single(Document::from_text("* work\n"), None);
-        ctrl(&mut app, 'k'); // quick reference
-        assert_eq!(app.buffer_count(), 2);
-        assert_eq!(app.buffer_labels()[app.active_index()].0, "*Quick reference*");
-        assert!(app.document().text().contains("torg")); // embedded doc content
+        ctrl(&mut app, 'k'); // help menu (Ctrl+H's portable fallback chord)
+        assert_eq!(app.buffer_count(), 1); // no new buffer — the menu isn't a document
+        assert!(matches!(
+            app.mode(),
+            Mode::HelpMenu {
+                category: 0,
+                selected: 0
+            }
+        ));
+        press(&mut app, KeyCode::Esc);
 
         ctrl(&mut app, 'u'); // full guide
-        assert_eq!(app.buffer_count(), 3);
+        assert_eq!(app.buffer_count(), 2);
         assert_eq!(app.buffer_labels()[app.active_index()].0, "*torg guide*");
 
-        // Opening the quick reference again switches to the existing buffer, no duplicate.
-        ctrl(&mut app, 'k');
-        assert_eq!(app.buffer_count(), 3);
-        assert_eq!(app.buffer_labels()[app.active_index()].0, "*Quick reference*");
+        // Opening the guide again switches to the existing buffer, no duplicate.
+        ctrl(&mut app, 'u');
+        assert_eq!(app.buffer_count(), 2);
+        assert_eq!(app.buffer_labels()[app.active_index()].0, "*torg guide*");
+    }
+
+    #[test]
+    fn ctrl_h_opens_the_help_menu_not_a_buffer() {
+        let mut app = single(Document::from_text("* work\n"), None);
+        let buffers_before = app.buffer_labels().len();
+        ctrl(&mut app, 'h');
+        assert!(matches!(app.mode(), Mode::HelpMenu { .. }));
+        assert_eq!(app.buffer_labels().len(), buffers_before); // no *Quick reference* buffer
+    }
+
+    #[test]
+    fn help_menu_navigation_wraps_both_axes() {
+        let mut app = single(Document::from_text("* work\n"), None);
+        ctrl(&mut app, 'h');
+        press(&mut app, KeyCode::Left); // category 0 -> last, selection resets to 0
+        assert!(matches!(app.mode(), Mode::HelpMenu { category, selected }
+            if *category == Category::ALL.len() - 1 && *selected == 0));
+        press(&mut app, KeyCode::Up); // selection 0 -> last row of that category
+        let last = commands_in(Category::ALL[Category::ALL.len() - 1]).len() - 1;
+        assert!(matches!(app.mode(), Mode::HelpMenu { selected, .. } if *selected == last));
+    }
+
+    #[test]
+    fn help_menu_navigation_wraps_forward_from_the_last_category_and_row() {
+        let mut app = single(Document::from_text("* work\n"), None);
+        ctrl(&mut app, 'h');
+        let last_cat = Category::ALL.len() - 1;
+        for _ in 0..last_cat {
+            press(&mut app, KeyCode::Right); // walk to the last category
+        }
+        press(&mut app, KeyCode::Right); // Right from the last category wraps to 0
+        assert!(matches!(app.mode(), Mode::HelpMenu { category, selected }
+            if *category == 0 && *selected == 0));
+
+        for _ in 0..last_cat {
+            press(&mut app, KeyCode::Tab); // Tab also switches category; walk back to the last
+        }
+        let last_row = commands_in(Category::ALL[last_cat]).len() - 1;
+        for _ in 0..last_row {
+            press(&mut app, KeyCode::Down); // walk to the last row
+        }
+        assert!(matches!(app.mode(), Mode::HelpMenu { selected, .. } if *selected == last_row));
+        press(&mut app, KeyCode::Down); // Down from the last row wraps to 0
+        assert!(matches!(app.mode(), Mode::HelpMenu { selected, .. } if *selected == 0));
+    }
+
+    #[test]
+    fn enter_runs_the_selected_command() {
+        let mut app = single(Document::from_text("* work\n"), None);
+        ctrl(&mut app, 'h');
+        // Navigate to Search/Find and confirm the Find prompt opens — computed from COMMANDS
+        // rather than hardcoded, so it doesn't drift if the category order changes.
+        let search_idx = Category::ALL.iter().position(|c| *c == Category::Search).unwrap();
+        for _ in 0..search_idx {
+            press(&mut app, KeyCode::Right);
+        }
+        press(&mut app, KeyCode::Enter);
+        assert!(matches!(app.mode(), Mode::Search { .. }));
+    }
+
+    #[test]
+    fn esc_and_ctrl_h_close_the_menu_without_side_effects() {
+        let mut app = single(Document::from_text("* work\n"), None);
+        let text_before = app.document().text();
+        ctrl(&mut app, 'h');
+        press(&mut app, KeyCode::Esc);
+        assert_eq!(app.mode(), &Mode::Edit);
+        ctrl(&mut app, 'h');
+        ctrl(&mut app, 'h');
+        assert_eq!(app.mode(), &Mode::Edit);
+        ctrl(&mut app, 'h');
+        ctrl(&mut app, 'k'); // Ctrl+K also closes the menu
+        assert_eq!(app.mode(), &Mode::Edit);
+        assert_eq!(app.document().text(), text_before);
     }
 
     #[test]

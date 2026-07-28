@@ -28,10 +28,12 @@ torg notes.org ideas.org  # several files — the first is shown, Alt+N reaches 
 - **No argument** starts an untitled buffer; the first `Ctrl+S` asks where to save.
 
 `torg --help` prints a usage summary and `torg --version` prints the version. Inside the
-editor, `Ctrl+H` opens this reference and `Ctrl+U` opens the full [guide](guide.md) — each in a
-buffer you read like any other and close with `Ctrl+W`. (`Ctrl+H` is the mnemonic for help;
-`Ctrl+K` also opens the reference for the few terminals that send `Ctrl+H` as `Backspace`.)
-Installed via a package, the reference is also a man page: `man torg`.
+editor, `Ctrl+H` opens a categorized help menu: `←`/`→` or `Tab` switches category, `↑`/`↓`
+selects a command, `Enter` runs it exactly as if you'd pressed its chord, and `Esc` closes the
+menu. `Enter` is also how you reach a chord your terminal swallows before it gets to torg.
+`Ctrl+K` opens the same menu, for the few terminals that send `Ctrl+H` as `Backspace`. `Ctrl+U`
+still opens the full [guide](guide.md) in a buffer you read like any other and close with
+`Ctrl+W`. Installed via a package, this reference is also a man page: `man torg`.
 
 ## Keys
 
@@ -63,7 +65,8 @@ Installed via a package, the reference is also a man page: `man torg`.
 | `Alt+N` / `Alt+P` | Switch to the next / previous buffer (wraps around). |
 | `Ctrl+B` | Open the buffer list — pick an open file with `↑`/`↓` + `Enter` or `1`-`9`. |
 | `Ctrl+W` | Close the current buffer (asks `y/n` if it has unsaved changes). |
-| `Ctrl+H` / `Ctrl+U` | Open this key reference / the full guide in the editor (`Ctrl+K` also opens the reference, for terminals that can't distinguish `Ctrl+H` from `Backspace`). |
+| `Ctrl+H` | Open the categorized help menu (`←`/`→`/`Tab` category, `↑`/`↓` select, `Enter` run, `Esc` close). `Ctrl+K` also opens it, for terminals that can't distinguish `Ctrl+H` from `Backspace`. |
+| `Ctrl+U` | Open the full guide in the editor. |
 | `Ctrl+Q` | Quit (asks `y/n` if any buffer has unsaved changes). |
 | `Esc` | Cancel a prompt, the buffer list, or a confirmation. |
 
@@ -207,10 +210,11 @@ The bottom row, in normal editing, shows from left to right:
 ```
 
 - **`[2/3]`** — buffer position: current buffer / total open. Shown **only** when more than one
-  buffer is open (hidden with a single file). Opening the in-editor help adds a buffer, so this
-  is why you might see `[2/2]` appear.
-- **name** — the file name, `[No Name]` for an untitled buffer, or `*Quick reference*` /
-  `*torg guide*` for the help buffers.
+  buffer is open (hidden with a single file). Opening the guide with `Ctrl+U` adds a buffer, so
+  this is why you might see `[2/2]` appear; the `Ctrl+H` help menu does not — it replaces the
+  view without opening a buffer.
+- **name** — the file name, `[No Name]` for an untitled buffer, or `*torg guide*` for the guide
+  buffer.
 - **`*`** — the buffer has unsaved changes.
 - **`3:5`** — cursor `line:col`, both 1-based.
 - **`Saved`** — a transient message (also `Opened <file>`, `New file: <file>`, completion

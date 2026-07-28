@@ -7,6 +7,7 @@
 mod action;
 mod app;
 mod buffer;
+mod commands;
 mod terminal;
 mod ui;
 mod viewport;
