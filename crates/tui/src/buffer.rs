@@ -28,7 +28,7 @@ pub struct Buffer {
     /// The document format (chosen by file extension), deciding which structure provider
     /// parses this buffer. Re-detected when *Save As* gives the buffer a new path.
     pub(crate) format: Format,
-    /// A fixed display name for a path-less scratch buffer (e.g. `*Quick reference*`). `None`
+    /// A fixed display name for a path-less scratch buffer (e.g. `*torg guide*`). `None`
     /// for ordinary file buffers, which name themselves from their path.
     pub(crate) name: Option<String>,
 }

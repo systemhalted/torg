@@ -515,7 +515,7 @@ impl App {
     }
 
     /// Open a read-through documentation buffer named `name` holding `text` (switching to it if
-    /// it's already open). Used for the in-editor quick reference and guide.
+    /// it's already open). Used for the in-editor guide.
     fn open_doc(&mut self, name: &str, text: &str) {
         if let Some(i) = self
             .buffers
