@@ -504,8 +504,9 @@ pub fn insert_item(doc: &mut Document, line: usize, format: Format) -> EditOutco
 /// A no-op off a list item; dedenting at indent 0 refuses ("Already at top level"), as does
 /// dedenting an indented Org `*` item down to column 0, which would turn it into a heading
 /// ("Would become a heading"). Ends by recomputing cookies: the new ancestor chain (and the
-/// enclosing heading) via [`update_cookies`], plus the item's FORMER parent's cookie
-/// directly, since that parent may no longer be an ancestor of `line` at all.
+/// enclosing heading) via [`update_cookies`], the item's FORMER parent's cookie directly
+/// (since that parent may no longer be an ancestor of `line` at all), and the item's OWN
+/// cookie (since re-indenting also changes which items count as ITS direct children).
 pub fn indent_item(doc: &mut Document, line: usize, format: Format, dedent: bool) -> EditOutcome {
     let Some(item) = item_at(doc, line, format) else {
         return EditOutcome::NoOp(NOT_ON_ITEM);
@@ -534,6 +535,7 @@ pub fn indent_item(doc: &mut Document, line: usize, format: Format, dedent: bool
     if let Some(old_parent) = old_parent_line {
         recompute_parent_cookie(doc, old_parent, format);
     }
+    recompute_parent_cookie(doc, line, format);
     EditOutcome::Changed { cursor_line: line }
 }
 
@@ -1049,5 +1051,21 @@ mod tests {
         let outcome = indent_item(&mut d, 2, Format::Org, false); // indent "b" under "a"
         assert_eq!(outcome, EditOutcome::Changed { cursor_line: 2 });
         assert_eq!(d.text(), "* H [0/1]\n- [ ] a\n  - [ ] b\n");
+    }
+
+    #[test]
+    fn indent_recomputes_the_moved_items_own_cookie_when_it_loses_a_child() {
+        let mut d = doc("- p [1/1]\n  - [X] c\n");
+        let outcome = indent_item(&mut d, 0, Format::Org, false); // indent "p"
+        assert_eq!(outcome, EditOutcome::Changed { cursor_line: 0 });
+        assert_eq!(d.text(), "  - p [0/0]\n  - [X] c\n");
+    }
+
+    #[test]
+    fn dedent_recomputes_the_moved_items_own_cookie_when_it_gains_a_child() {
+        let mut d = doc("- a [2/2]\n  - [X] b [0/0]\n  - [X] c\n");
+        let outcome = indent_item(&mut d, 1, Format::Org, true); // dedent "b"
+        assert_eq!(outcome, EditOutcome::Changed { cursor_line: 1 });
+        assert_eq!(d.text(), "- a [0/0]\n- [X] b [1/1]\n  - [X] c\n");
     }
 }
