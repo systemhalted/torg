@@ -3,7 +3,7 @@
 //! differs per format by only the bullet rules, so there is no new trait.
 
 use crate::document::Document;
-use crate::structure::{line_in_fence, Format};
+use crate::structure::{line_in_fence, EditOutcome, Format, Heading, Outline, StructureProvider};
 
 /// The bullet marker that opens a list item.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -102,7 +102,10 @@ fn parse_item(text: &str, line: usize, format: Format) -> Option<ListItem> {
 
 /// Parse a leading `[ ]`/`[X]`/`[x]`/`[-]` checkbox off `rest` (the text right after the
 /// bullet's one space). Returns the state and how many chars it (plus one trailing space,
-/// if present) consumed. `None` if `rest` doesn't open with a recognized checkbox token.
+/// if present) consumed. `None` if `rest` doesn't open with a recognized checkbox token, OR
+/// if it does but isn't in the required space-delimited form: a checkbox is only a checkbox
+/// when the closing bracket is followed by a space or is the end of the line (`- [ ] task`,
+/// `- [ ]`); glued-on content (`- [ ]x`) means the brackets are ordinary text instead.
 fn parse_checkbox(rest: &str, _format: Format) -> Option<(CheckState, usize)> {
     let mut chars = rest.chars();
     if chars.next() != Some('[') {
@@ -117,9 +120,285 @@ fn parse_checkbox(rest: &str, _format: Format) -> Option<(CheckState, usize)> {
     if chars.next() != Some(']') {
         return None;
     }
-    // "[ ]" is 3 chars; one more if a space follows (content resumes after it).
-    let trailing_space = rest[3..].starts_with(' ');
-    Some((state, if trailing_space { 4 } else { 3 }))
+    // "[ ]" is 3 chars. What follows must be a space (consumed too — content resumes after
+    // it) or nothing at all (end of line); anything else disqualifies the whole match.
+    match rest[3..].chars().next() {
+        None => Some((state, 3)),
+        Some(' ') => Some((state, 4)),
+        Some(_) => None,
+    }
+}
+
+/// Status text for [`toggle_checkbox`] off a checkbox.
+const NO_CHECKBOX: &str = "No checkbox here";
+
+/// Flip the checkbox at `line`: `[ ]`/`[-]` → checked, `[X]`/`[x]` → unchecked, written back
+/// format-aware (`[X]` in Org, `[x]` in Markdown — the design doc's syntax table). A no-op
+/// with [`NO_CHECKBOX`] off an item line or off an item with no checkbox. Recomputes the
+/// affected cookies afterward via [`update_cookies`]; the cursor stays on `line`.
+pub fn toggle_checkbox(doc: &mut Document, line: usize, format: Format) -> EditOutcome {
+    let Some(item) = item_at(doc, line, format) else {
+        return EditOutcome::NoOp(NO_CHECKBOX);
+    };
+    let Some(state) = item.checkbox else {
+        return EditOutcome::NoOp(NO_CHECKBOX);
+    };
+    let raw = doc.line_text(line);
+    let text = raw.strip_suffix('\n').unwrap_or(&raw);
+    let state_col = checkbox_state_col(text, item.content_col)
+        .expect("item_at reported a checkbox, so its state char must be locatable");
+    let new_char = match state {
+        CheckState::Checked => ' ',
+        CheckState::Unchecked | CheckState::Partial => checked_char(format),
+    };
+    let base = doc.line_to_char(line);
+    doc.remove(base + state_col..base + state_col + 1);
+    doc.insert(base + state_col, &new_char.to_string());
+    update_cookies(doc, line, format);
+    EditOutcome::Changed { cursor_line: line }
+}
+
+/// The char written for a checked box: `X` in Org, `x` in Markdown (GFM convention).
+fn checked_char(format: Format) -> char {
+    match format {
+        Format::Org => 'X',
+        Format::Markdown => 'x',
+    }
+}
+
+/// The char column of the state character inside a line's checkbox (`[` col+1 `]`), derived
+/// from `content_col` (the column just past the checkbox and its one trailing space, if the
+/// line has content after it) without needing to reconstruct the bullet's width. `None` if
+/// the chars immediately before `content_col` don't spell out a checkbox — callers only
+/// reach this once `item_at` has already confirmed one exists, so this should not happen.
+fn checkbox_state_col(text: &str, content_col: usize) -> Option<usize> {
+    let chars: Vec<char> = text.chars().collect();
+    if content_col >= 1 && content_col <= chars.len() && chars[content_col - 1] == ']' {
+        return Some(content_col - 2); // "- [ ]" at EOL: no trailing space was consumed
+    }
+    if content_col >= 2
+        && content_col <= chars.len()
+        && chars[content_col - 2] == ']'
+        && chars[content_col - 1] == ' '
+    {
+        return Some(content_col - 3); // "- [ ] …": the trailing space was consumed too
+    }
+    None
+}
+
+/// Recompute every `[n/m]` / `[p%]` statistics cookie affected by a change on `line`: every
+/// ancestor item's cookie (counting that ancestor's DIRECT children only) and the enclosing
+/// heading's cookie (counting TOP-LEVEL checkbox items in the heading's own section only).
+/// Never inserts a cookie that wasn't already there — see the design doc's cookie rules.
+///
+/// Cost profile: this runs once per user edit (toggle/insert/indent), not on every keystroke.
+/// It does one pass over the contiguous item region containing `line` — [`region_items`]
+/// parses each of those lines with `item_at` exactly once, however many ancestors `line` has
+/// — then one direct-children scan per ancestor over that same in-memory list (no further
+/// `item_at` calls there), plus one pass over the enclosing heading's own section to count
+/// top-level checkbox items (again one `item_at` call per line in that section). So the cost
+/// is linear in the affected list region plus one heading section, not quadratic in document
+/// size, and no line is ever re-parsed once for each ancestor.
+pub fn update_cookies(doc: &mut Document, line: usize, format: Format) {
+    let items = region_items(doc, line, format);
+    for parent_line in parent_chain(&items, line) {
+        let (checked, total) = direct_children(&items, parent_line);
+        rewrite_cookies_on_line(doc, parent_line, checked, total);
+    }
+
+    let outline = format.parse(doc);
+    if let Some(h) = enclosing_heading(&outline, line) {
+        let section_end = heading_own_section_end(&outline, h);
+        let (checked, total) = top_level_checkbox_counts(doc, h.line + 1, section_end, format);
+        rewrite_cookies_on_line(doc, h.line, checked, total);
+    }
+}
+
+/// The maximal contiguous run of item lines containing `line` (empty if `line` itself isn't
+/// one): expands outward from `line` while `item_at` returns `Some`, so each line in the
+/// region is parsed exactly once regardless of how many ancestors are later queried against
+/// the result.
+fn region_items(doc: &Document, line: usize, format: Format) -> Vec<ListItem> {
+    let Some(cur) = item_at(doc, line, format) else {
+        return Vec::new();
+    };
+    let mut items = vec![cur];
+    let mut l = line;
+    while l > 0 {
+        match item_at(doc, l - 1, format) {
+            Some(it) => {
+                items.push(it);
+                l -= 1;
+            }
+            None => break,
+        }
+    }
+    items.reverse();
+    let mut l = line;
+    while let Some(it) = item_at(doc, l + 1, format) {
+        items.push(it);
+        l += 1;
+    }
+    items
+}
+
+/// The lines of every ancestor of the item at `line` within `items` (nearest first): repeat
+/// "nearest preceding item with strictly smaller indent" until none remains.
+fn parent_chain(items: &[ListItem], line: usize) -> Vec<usize> {
+    let mut chain = Vec::new();
+    let Some(mut idx) = items.iter().position(|it| it.line == line) else {
+        return chain;
+    };
+    while let Some(p) = items[..idx].iter().rposition(|it| it.indent < items[idx].indent) {
+        chain.push(items[p].line);
+        idx = p;
+    }
+    chain
+}
+
+/// `(checked, total)` among the direct children of the item at `parent_line` within `items`:
+/// the items below it, before the next item at or above its indent, restricted to the
+/// MINIMUM indent found in that span — so grandchildren nested deeper than the direct
+/// children are excluded — and, of those, only the ones that are themselves checkbox items.
+fn direct_children(items: &[ListItem], parent_line: usize) -> (usize, usize) {
+    let Some(p_idx) = items.iter().position(|it| it.line == parent_line) else {
+        return (0, 0);
+    };
+    let parent_indent = items[p_idx].indent;
+    let span: Vec<&ListItem> = items[p_idx + 1..]
+        .iter()
+        .take_while(|it| it.indent > parent_indent)
+        .collect();
+    let Some(min_indent) = span.iter().map(|it| it.indent).min() else {
+        return (0, 0);
+    };
+    let total = span.iter().filter(|it| it.indent == min_indent && it.checkbox.is_some()).count();
+    let checked = span
+        .iter()
+        .filter(|it| it.indent == min_indent && it.checkbox == Some(CheckState::Checked))
+        .count();
+    (checked, total)
+}
+
+/// The heading whose subtree contains `line` — the nearest heading at or above it. Mirrors
+/// `structure::enclosing`, which is private to that module; kept local since list.rs is the
+/// only other place that needs it.
+fn enclosing_heading(outline: &Outline, line: usize) -> Option<&Heading> {
+    outline.headings.iter().rev().find(|h| h.line <= line)
+}
+
+/// The end of `h`'s own section text: its subtree body, but stopping before any child
+/// heading's own section — i.e. before the next heading at ANY level, not just `h`'s level.
+fn heading_own_section_end(outline: &Outline, h: &Heading) -> usize {
+    outline
+        .headings
+        .iter()
+        .find(|other| other.line > h.line)
+        .map(|next| if next.line <= h.last_line { next.line - 1 } else { h.last_line })
+        .unwrap_or(h.last_line)
+}
+
+/// `(checked, total)` among the TOP-LEVEL checkbox items in `start..=end`: items with no
+/// item above them, within the same contiguous item run, at a strictly smaller indent —
+/// nested items (and whole nested lists under them) are excluded. Each line in the range is
+/// parsed by `item_at` exactly once.
+fn top_level_checkbox_counts(
+    doc: &Document,
+    start: usize,
+    end: usize,
+    format: Format,
+) -> (usize, usize) {
+    let last = doc.line_count().saturating_sub(1);
+    if start > last {
+        return (0, 0);
+    }
+    let end = end.min(last);
+    let mut run: Vec<ListItem> = Vec::new(); // the current contiguous item run
+    let mut checked = 0usize;
+    let mut total = 0usize;
+    for l in start..=end {
+        match item_at(doc, l, format) {
+            Some(item) => {
+                let has_parent = run.iter().any(|prev| prev.indent < item.indent);
+                if !has_parent && item.checkbox.is_some() {
+                    total += 1;
+                    if item.checkbox == Some(CheckState::Checked) {
+                        checked += 1;
+                    }
+                }
+                run.push(item);
+            }
+            None => run.clear(), // a non-item line ends the current run
+        }
+    }
+    (checked, total)
+}
+
+/// Rewrite every `[n/m]` / `[p%]` (including the unfilled `[/]` / `[%]` forms) cookie token
+/// found in `line`'s text to reflect `(checked, total)`; a no-op if the line has none, so a
+/// cookie is never inserted. Percentages truncate (`100 * checked / total`); `total == 0`
+/// writes `0` literally (`[0/0]`, `[0%]`), matching Org. Edits are rightmost-first so
+/// earlier spans stay valid as later ones are applied.
+fn rewrite_cookies_on_line(doc: &mut Document, line: usize, checked: usize, total: usize) {
+    let raw = doc.line_text(line);
+    let text = raw.strip_suffix('\n').unwrap_or(&raw).to_string();
+    let spans = cookie_spans(&text);
+    if spans.is_empty() {
+        return;
+    }
+    let base = doc.line_to_char(line);
+    let pct = (100 * checked).checked_div(total).unwrap_or(0);
+    for (start, end, is_percent) in spans.into_iter().rev() {
+        let replacement =
+            if is_percent { format!("[{pct}%]") } else { format!("[{checked}/{total}]") };
+        doc.remove(base + start..base + end);
+        doc.insert(base + start, &replacement);
+    }
+}
+
+/// Char spans of every `[...]` token in `text` that is a statistics cookie — `[n/m]`, `[p%]`,
+/// or their unfilled forms `[/]`/`[%]` — as `(start, end_exclusive, is_percent)`. Anything
+/// else in brackets (a checkbox, a priority cookie, plain text) matches neither shape and is
+/// left alone.
+fn cookie_spans(text: &str) -> Vec<(usize, usize, bool)> {
+    let chars: Vec<char> = text.chars().collect();
+    let mut spans = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '[' {
+            if let Some(rel_close) = chars[i + 1..].iter().position(|&c| c == ']') {
+                let close = i + 1 + rel_close;
+                let content: String = chars[i + 1..close].iter().collect();
+                if is_fraction_cookie(&content) {
+                    spans.push((i, close + 1, false));
+                    i = close + 1;
+                    continue;
+                } else if is_percent_cookie(&content) {
+                    spans.push((i, close + 1, true));
+                    i = close + 1;
+                    continue;
+                }
+            }
+        }
+        i += 1;
+    }
+    spans
+}
+
+/// Whether `s` (the text between a cookie's brackets) is an `[n/m]` fraction, filled or not
+/// (`3/5`, `/5`, `3/`, or the fully unfilled `/`).
+fn is_fraction_cookie(s: &str) -> bool {
+    match s.split_once('/') {
+        Some((a, b)) => {
+            a.chars().all(|c| c.is_ascii_digit()) && b.chars().all(|c| c.is_ascii_digit())
+        }
+        None => false,
+    }
+}
+
+/// Whether `s` is a `[p%]` percentage, filled or not (`50%` or the unfilled `%`).
+fn is_percent_cookie(s: &str) -> bool {
+    s.strip_suffix('%').is_some_and(|digits| digits.chars().all(|c| c.is_ascii_digit()))
 }
 
 #[cfg(test)]
@@ -251,5 +530,154 @@ mod tests {
         assert!(item_at(&doc(text), 2, Format::Markdown).is_none()); // fenced "- item"
         let item = item_at(&doc(text), 4, Format::Markdown).unwrap(); // real item after the fence
         assert_eq!(item.bullet, Bullet::Dash);
+    }
+
+    // ---- carry-over: checkbox requires the space-delimited form -------------------
+
+    #[test]
+    fn checkbox_at_end_of_line_with_nothing_after_still_parses() {
+        // "- [ ]" with nothing following the closing bracket is a checkbox with empty
+        // content, not a rejected match — content_col lands at end of line.
+        let item = item_at(&doc("- [ ]\n"), 0, Format::Org).unwrap();
+        assert_eq!(item.checkbox, Some(CheckState::Unchecked));
+        assert_eq!(item.content_col, 5);
+    }
+
+    #[test]
+    fn checkbox_glued_to_trailing_content_is_not_a_checkbox() {
+        // "- [ ]x" has no space delimiting the checkbox from what follows, so the whole
+        // bracket is content, not a checkbox.
+        let item = item_at(&doc("- [ ]x\n"), 0, Format::Org).unwrap();
+        assert_eq!(item.checkbox, None);
+        assert_eq!(item.content_col, 2);
+    }
+
+    // ---- toggle_checkbox ------------------------------------------------------------
+
+    #[test]
+    fn toggle_unchecked_to_checked_writes_uppercase_x_in_org() {
+        let mut d = doc("- [ ] task\n");
+        let outcome = toggle_checkbox(&mut d, 0, Format::Org);
+        assert_eq!(outcome, EditOutcome::Changed { cursor_line: 0 });
+        assert_eq!(d.text(), "- [X] task\n");
+    }
+
+    #[test]
+    fn toggle_unchecked_to_checked_writes_lowercase_x_in_markdown() {
+        let mut d = doc("- [ ] task\n");
+        toggle_checkbox(&mut d, 0, Format::Markdown);
+        assert_eq!(d.text(), "- [x] task\n");
+    }
+
+    #[test]
+    fn toggle_checked_to_unchecked_in_both_formats() {
+        let mut d = doc("- [X] task\n");
+        toggle_checkbox(&mut d, 0, Format::Org);
+        assert_eq!(d.text(), "- [ ] task\n");
+
+        let mut d = doc("- [x] task\n");
+        toggle_checkbox(&mut d, 0, Format::Markdown);
+        assert_eq!(d.text(), "- [ ] task\n");
+    }
+
+    #[test]
+    fn toggle_partial_becomes_checked() {
+        let mut d = doc("- [-] task\n");
+        toggle_checkbox(&mut d, 0, Format::Org);
+        assert_eq!(d.text(), "- [X] task\n");
+    }
+
+    #[test]
+    fn toggle_on_an_item_with_no_checkbox_is_a_noop() {
+        let mut d = doc("- plain item\n");
+        let outcome = toggle_checkbox(&mut d, 0, Format::Org);
+        assert_eq!(outcome, EditOutcome::NoOp("No checkbox here"));
+        assert_eq!(d.text(), "- plain item\n");
+    }
+
+    #[test]
+    fn toggle_on_a_non_item_line_is_a_noop() {
+        let mut d = doc("just prose\n");
+        let outcome = toggle_checkbox(&mut d, 0, Format::Org);
+        assert_eq!(outcome, EditOutcome::NoOp("No checkbox here"));
+        assert_eq!(d.text(), "just prose\n");
+    }
+
+    // ---- update_cookies (exercised through toggle_checkbox) ------------------------
+
+    #[test]
+    fn toggling_a_child_updates_the_parent_fraction_cookie() {
+        let mut d = doc("- top [0/2]\n  - [ ] a\n  - [ ] b\n");
+        toggle_checkbox(&mut d, 1, Format::Org); // toggle "a"
+        assert_eq!(d.text(), "- top [1/2]\n  - [X] a\n  - [ ] b\n");
+    }
+
+    #[test]
+    fn grandchildren_do_not_count_toward_the_grandparent_cookie() {
+        let mut d =
+            doc("- [ ] grandparent [0/1]\n  - [ ] parent [0/1]\n    - [ ] child\n");
+        toggle_checkbox(&mut d, 2, Format::Org); // toggle "child"
+        assert_eq!(
+            d.text(),
+            "- [ ] grandparent [0/1]\n  - [ ] parent [1/1]\n    - [X] child\n"
+        );
+    }
+
+    #[test]
+    fn percent_cookie_updates_by_truncation() {
+        let mut d = doc("- top [0%]\n  - [X] a\n  - [ ] b\n  - [ ] c\n");
+        toggle_checkbox(&mut d, 3, Format::Org); // toggle "c": 1 -> 2 of 3 checked
+        assert_eq!(d.text(), "- top [66%]\n  - [X] a\n  - [ ] b\n  - [X] c\n");
+    }
+
+    #[test]
+    fn unfilled_cookies_get_filled_in() {
+        let mut d = doc("- top [/]\n  - [X] a\n  - [ ] b\n");
+        toggle_checkbox(&mut d, 2, Format::Org); // toggle "b"
+        assert_eq!(d.text(), "- top [2/2]\n  - [X] a\n  - [X] b\n");
+
+        let mut d = doc("- top [%]\n  - [X] a\n  - [ ] b\n");
+        toggle_checkbox(&mut d, 2, Format::Org);
+        assert_eq!(d.text(), "- top [100%]\n  - [X] a\n  - [X] b\n");
+    }
+
+    #[test]
+    fn heading_cookie_counts_only_top_level_checkbox_items() {
+        let mut d = doc(
+            "* Groceries [0/3]\n- [ ] milk\n  - [ ] cream\n- [ ] eggs\n- [ ] bread\n",
+        );
+        toggle_checkbox(&mut d, 1, Format::Org); // toggle "milk"
+        assert_eq!(
+            d.text(),
+            "* Groceries [1/3]\n- [X] milk\n  - [ ] cream\n- [ ] eggs\n- [ ] bread\n"
+        );
+    }
+
+    #[test]
+    fn a_heading_cookie_in_a_different_section_is_untouched() {
+        let mut d = doc("* A [0/1]\n- [ ] a1\n* B [0/1]\n- [ ] b1\n");
+        toggle_checkbox(&mut d, 1, Format::Org); // toggle a1, under heading A
+        assert_eq!(d.text(), "* A [1/1]\n- [X] a1\n* B [0/1]\n- [ ] b1\n");
+    }
+
+    #[test]
+    fn multiple_cookies_on_one_line_all_update() {
+        let mut d = doc("- top [0/2] again [0/2]\n  - [ ] a\n  - [ ] b\n");
+        toggle_checkbox(&mut d, 1, Format::Org); // toggle "a"
+        assert_eq!(d.text(), "- top [1/2] again [1/2]\n  - [X] a\n  - [ ] b\n");
+    }
+
+    #[test]
+    fn a_parent_with_no_cookie_gains_nothing() {
+        let mut d = doc("- top no cookie\n  - [ ] a\n  - [ ] b\n");
+        toggle_checkbox(&mut d, 1, Format::Org); // toggle "a"
+        assert_eq!(d.text(), "- top no cookie\n  - [X] a\n  - [ ] b\n");
+    }
+
+    #[test]
+    fn cookie_rewrite_preserves_surrounding_text_on_the_line() {
+        let mut d = doc("- Shopping [0/2] (due Friday)\n  - [ ] a\n  - [ ] b\n");
+        toggle_checkbox(&mut d, 1, Format::Org); // toggle "a"
+        assert_eq!(d.text(), "- Shopping [1/2] (due Friday)\n  - [X] a\n  - [ ] b\n");
     }
 }
