@@ -60,6 +60,20 @@ delete and join at the edges.
 .TP
 .B Tab
 Fold a heading's subtree, or insert a tab elsewhere.
+.SS Search
+.TP
+.B Ctrl+F
+Open the incremental Find prompt.
+.RB ( Ctrl+F / Ctrl+R
+jump to the next / previous match while the prompt is open;
+.B Enter
+accepts the match;
+.B Esc
+cancels back to the starting position.)
+.PP
+A query typed in all lowercase matches case\(hyinsensitively; any capital letter makes it
+an exact match. Search wraps around the buffer and matches literal text only, not regular
+expressions.
 .SS Outline and TODO
 .TP
 .BR Ctrl+N ", " Ctrl+P

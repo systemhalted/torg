@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use torg_core::document::Document;
+use torg_core::search::find;
 use torg_core::structure::{
     detect_format, is_valid_tag, next_heading, prev_heading, shift_timestamp, EditOutcome, Format,
     Outline, Planning, StructureProvider,
@@ -42,6 +43,14 @@ pub enum Mode {
     /// A date prompt is open; `input` is the timestamp typed so far and `purpose` is what to
     /// do with it on submit.
     DatePrompt { input: String, purpose: DatePurpose },
+    /// The incremental-search prompt is open. `origin*` restore the view on Esc; query
+    /// edits re-search from the origin, stepping searches from the cursor.
+    Search {
+        input: String,
+        origin: (usize, usize),
+        origin_top: usize,
+        forward: bool,
+    },
 }
 
 /// What a [`Mode::DatePrompt`] does with the date the user types.
@@ -262,6 +271,8 @@ pub struct App {
     page: usize,
     /// A transient status-line message (save result, error), cleared on the next key.
     status: String,
+    /// The last query accepted with Enter, used to pre-fill the next Find prompt.
+    last_query: String,
     should_quit: bool,
 }
 
@@ -278,6 +289,7 @@ impl App {
             mode: Mode::Edit,
             page: 1,
             status: String::new(),
+            last_query: String::new(),
             should_quit: false,
         }
     }
@@ -310,6 +322,16 @@ impl App {
     }
     pub fn status(&self) -> &str {
         &self.status
+    }
+    /// The active search highlight: query + the current match's (line, col), if searching.
+    pub fn search_hl(&self) -> Option<(&str, (usize, usize))> {
+        match &self.mode {
+            Mode::Search { input, .. } if !input.is_empty() => {
+                let b = self.buf();
+                Some((input.as_str(), (b.view.cursor_line(), b.view.cursor_column())))
+            }
+            _ => None,
+        }
     }
     pub fn should_quit(&self) -> bool {
         self.should_quit
@@ -371,6 +393,7 @@ impl App {
             | Mode::DatePrompt { .. } => self.handle_prompt_key(key),
             Mode::BufferList { .. } => self.handle_bufferlist_key(key),
             Mode::ConfirmClose | Mode::ConfirmQuit => self.handle_confirm_key(key),
+            Mode::Search { .. } => self.handle_search_key(key),
         }
     }
 
@@ -477,6 +500,7 @@ impl App {
             Action::InsertInactiveTs => self.open_date_prompt(DatePurpose::InsertInactive),
             Action::Help => self.open_doc("*Quick reference*", include_str!("../../../docs/usage.md")),
             Action::Guide => self.open_doc("*torg guide*", include_str!("../../../docs/guide.md")),
+            Action::Find => self.open_search(),
         }
     }
 
@@ -873,6 +897,121 @@ impl App {
         } else {
             format!("New file: {name}")
         };
+    }
+
+    // ---- incremental search -------------------------------------------------
+
+    /// `Ctrl+F` in Edit mode: open the Find prompt, pre-filled with the last accepted query.
+    fn open_search(&mut self) {
+        let b = self.buf();
+        let origin = (b.view.cursor_line(), b.view.cursor_column());
+        let origin_top = b.scroll_top;
+        self.mode = Mode::Search {
+            input: self.last_query.clone(),
+            origin,
+            origin_top,
+            forward: true,
+        };
+        if !self.last_query.is_empty() {
+            self.search_from(origin, true);
+        }
+    }
+
+    /// Re-run the current query from `from` in `forward`'s direction and move the cursor onto
+    /// the hit, setting the Wrapped / Not found status. A no-op on an empty query.
+    fn search_from(&mut self, from: (usize, usize), forward: bool) {
+        let query = match &self.mode {
+            Mode::Search { input, .. } => input.clone(),
+            _ => return,
+        };
+        if query.is_empty() {
+            return;
+        }
+        match find(&self.buf().doc, &query, from, forward) {
+            Some((m, wrapped)) => {
+                let b = self.buf_mut();
+                b.view.move_to(&b.doc, m.line, m.col);
+                self.status = if wrapped { "Wrapped".into() } else { String::new() };
+            }
+            None => self.status = "Not found".into(),
+        }
+    }
+
+    /// One character past the cursor in the stepping direction — the anchor `Ctrl+F`/`Ctrl+R`
+    /// search from, so repeating the step doesn't just re-find the current match.
+    fn step_anchor(&self, forward: bool) -> (usize, usize) {
+        let b = self.buf();
+        let idx = b.view.cursor_char_idx(&b.doc);
+        let idx = if forward {
+            (idx + 1).min(b.doc.char_count())
+        } else if idx == 0 {
+            b.doc.char_count()
+        } else {
+            idx - 1
+        };
+        let line = b.doc.char_to_line(idx);
+        (line, idx - b.doc.line_to_char(line))
+    }
+
+    /// Drive the Find prompt: `Ctrl+F`/`Ctrl+R` step to the next/previous match, any other key
+    /// edits the query (re-searching from the origin), Enter accepts, Esc cancels.
+    fn handle_search_key(&mut self, key: KeyEvent) {
+        if key.kind != KeyEventKind::Press {
+            return;
+        }
+        let is_ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        if is_ctrl && matches!(key.code, KeyCode::Char('f') | KeyCode::Char('r')) {
+            let fwd = matches!(key.code, KeyCode::Char('f'));
+            if let Mode::Search { forward, .. } = &mut self.mode {
+                *forward = fwd;
+            }
+            // Stepping backward from the very first character has no earlier position to
+            // land on, so any match `step_anchor`'s wrapped-around anchor finds is
+            // necessarily a wrap. `find`'s own sweep can't tell that from this anchor (its
+            // "no-wrap" pass over the earlier lines still covers the whole real document
+            // when the anchor sits on the trailing phantom line), so we report it ourselves.
+            let has_query = matches!(&self.mode, Mode::Search { input, .. } if !input.is_empty());
+            let b = self.buf();
+            let wraps_at_start = !fwd && has_query && b.view.cursor_char_idx(&b.doc) == 0;
+            let from = self.step_anchor(fwd);
+            self.search_from(from, fwd);
+            if wraps_at_start && self.status.is_empty() {
+                self.status = "Wrapped".into();
+            }
+            return;
+        }
+        self.status.clear();
+        let (event, origin, origin_top, forward, query_is_empty) = match &mut self.mode {
+            Mode::Search {
+                input,
+                origin,
+                origin_top,
+                forward,
+            } => {
+                let event = prompt_event(input, key);
+                (event, *origin, *origin_top, *forward, input.is_empty())
+            }
+            _ => return,
+        };
+        match event {
+            PromptEvent::Pending if query_is_empty => {
+                // Empty query matches nothing: the cursor sits at the origin, no status.
+                let b = self.buf_mut();
+                b.view.move_to(&b.doc, origin.0, origin.1);
+                b.scroll_top = origin_top;
+            }
+            PromptEvent::Pending => self.search_from(origin, forward),
+            PromptEvent::Cancelled => {
+                let b = self.buf_mut();
+                b.view.move_to(&b.doc, origin.0, origin.1);
+                b.scroll_top = origin_top;
+                self.mode = Mode::Edit;
+            }
+            PromptEvent::Submitted(text) => {
+                self.last_query = text;
+                self.mode = Mode::Edit;
+            }
+        }
     }
 }
 
@@ -1758,5 +1897,123 @@ mod tests {
         assert!(app.is_folded_heading(0)); // fold intact
         assert_eq!(app.view().cursor_line(), line_before); // cursor intact
         assert_eq!(app.document().text(), "* A\nbody\n"); // content untouched
+    }
+
+    // ---- incremental search -------------------------------------------------
+
+    #[test]
+    fn typing_in_the_find_prompt_jumps_to_the_nearest_match() {
+        let mut app = single(Document::from_text("alpha\nbeta\ngamma\n"), None);
+        ctrl(&mut app, 'f');
+        typ(&mut app, "gam");
+        assert_eq!(app.view().cursor_line(), 2);
+    }
+
+    #[test]
+    fn backspace_re_searches_from_the_origin() {
+        let mut app = single(Document::from_text("gab\ngamma\n"), None);
+        ctrl(&mut app, 'f');
+        typ(&mut app, "gam");
+        assert_eq!(app.view().cursor_line(), 1);
+        press(&mut app, KeyCode::Backspace); // query "ga" — first match from the origin
+        assert_eq!(app.view().cursor_line(), 0);
+    }
+
+    #[test]
+    fn backspacing_to_an_empty_query_returns_to_the_origin() {
+        let mut app = single(Document::from_text("xxx\ngam\n"), None);
+        ctrl(&mut app, 'f');
+        typ(&mut app, "g");
+        assert_eq!(app.view().cursor_line(), 1);
+        press(&mut app, KeyCode::Backspace); // query now empty
+        assert_eq!(app.view().cursor_line(), 0);
+        assert_eq!(app.view().cursor_column(), 0);
+        assert_eq!(app.status(), "");
+        assert!(matches!(app.mode(), Mode::Search { .. })); // prompt stays open
+    }
+
+    #[test]
+    fn ctrl_f_steps_forward_and_ctrl_r_back() {
+        let mut app = single(Document::from_text("x\nfoo\nbar\nfoo\n"), None);
+        ctrl(&mut app, 'f');
+        typ(&mut app, "foo");
+        assert_eq!(app.view().cursor_line(), 1);
+        ctrl(&mut app, 'f');
+        assert_eq!(app.view().cursor_line(), 3);
+        ctrl(&mut app, 'r');
+        assert_eq!(app.view().cursor_line(), 1);
+    }
+
+    #[test]
+    fn esc_restores_cursor_and_enter_keeps_the_match_and_query() {
+        let mut app = single(Document::from_text("x\ny\nzz needle\n"), None);
+        ctrl(&mut app, 'f');
+        typ(&mut app, "needle");
+        assert_eq!(app.view().cursor_line(), 2);
+        press(&mut app, KeyCode::Esc);
+        assert_eq!(app.view().cursor_line(), 0); // cursor restored to the origin
+        assert_eq!(app.mode(), &Mode::Edit);
+
+        ctrl(&mut app, 'f');
+        typ(&mut app, "needle");
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(app.view().cursor_line(), 2); // cursor stays at the match
+        assert_eq!(app.mode(), &Mode::Edit);
+
+        press(&mut app, KeyCode::Up);
+        press(&mut app, KeyCode::Up);
+        assert_eq!(app.view().cursor_line(), 0);
+
+        ctrl(&mut app, 'f'); // pre-filled with "needle" — jumps immediately
+        assert_eq!(app.view().cursor_line(), 2);
+    }
+
+    #[test]
+    fn wraparound_and_not_found_set_statuses() {
+        let mut app = single(Document::from_text("needle\nx\n"), None);
+        ctrl(&mut app, 'f');
+        typ(&mut app, "needle");
+        assert_eq!(app.status(), ""); // origin match — no status
+        ctrl(&mut app, 'f'); // step forward: only match is behind, so it wraps
+        assert_eq!(app.status(), "Wrapped");
+
+        let mut app2 = single(Document::from_text("plain\n"), None);
+        ctrl(&mut app2, 'f');
+        typ(&mut app2, "zzz");
+        assert_eq!(app2.status(), "Not found");
+    }
+
+    #[test]
+    fn esc_restores_the_scroll_position_too_not_just_the_cursor() {
+        let mut text = String::new();
+        for i in 0..50 {
+            if i == 40 {
+                text.push_str("needle\n");
+            } else {
+                text.push_str(&format!("line {i}\n"));
+            }
+        }
+        let mut app = single(Document::from_text(&text), None);
+        ctrl(&mut app, 'f');
+        typ(&mut app, "needle");
+        assert_eq!(app.view().cursor_line(), 40);
+        app.update_scroll(10); // a small body height forces the viewport to scroll down
+        assert_ne!(app.scroll_top(), 0);
+
+        press(&mut app, KeyCode::Esc);
+        assert_eq!(app.view().cursor_line(), 0);
+        assert_eq!(app.scroll_top(), 0); // the pre-search viewport, not wherever the match left it
+    }
+
+    #[test]
+    fn ctrl_r_at_document_start_wraps_backward() {
+        let mut app = single(Document::from_text("foo x foo\n"), None);
+        ctrl(&mut app, 'f');
+        typ(&mut app, "foo");
+        assert_eq!(app.view().cursor_line(), 0);
+        assert_eq!(app.view().cursor_column(), 0); // lands on the first "foo"
+        ctrl(&mut app, 'r'); // step backward from the very start — must wrap, not no-op
+        assert_eq!(app.view().cursor_column(), 6);
+        assert_eq!(app.status(), "Wrapped");
     }
 }
