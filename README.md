@@ -16,10 +16,10 @@ as an installable *package* over a stable core API.)
 **Runnable.** `torg` is a terminal editor that opens, edits, and saves multiple buffers —
 several files in one session, switched without quitting — and it understands both Org `*`
 headings and Markdown `#` headings: folding, navigation, `TODO`/`DONE` cycling, structural
-editing (promote/demote, move, priorities, tags), and Org timestamps with scheduling. This is
-Milestones 2 and 3 complete, plus the multi-file machinery from M5 and the first slice of M4
-(dates); the longer arc toward full Org (agenda, source blocks, export) is in
-[`docs/roadmap.md`](docs/roadmap.md).
+editing (promote/demote, move, priorities, tags), Org timestamps with scheduling, and plain
+lists with checkboxes and statistics cookies. This is Milestones 2 and 3 complete, plus the
+multi-file machinery from M5 and two slices of M4 (dates, lists); the longer arc toward full
+Org (agenda, source blocks, export) is in [`docs/roadmap.md`](docs/roadmap.md).
 
 ```sh
 cargo run -p torg-tui -- notes.org
@@ -71,6 +71,10 @@ list:
 - **dates**: Org timestamps parse as data — active/inactive, times, ranges, repeaters; set a
   heading's `SCHEDULED`/`DEADLINE` (`Alt+S`/`Alt+D`), insert a timestamp (`Alt+.`/`Alt+i`),
   and shift the field under the cursor with `Shift+↑/↓`; timestamps are highlighted
+- **lists and checkboxes**: plain bulleted/numbered lists in both formats, nested by
+  indentation; toggle a checkbox with `Ctrl+Space`/`Alt+X`; `Alt+Enter`/`Alt+←/→` become
+  list-aware on an item line (insert a sibling item, dedent/indent it); `[n/m]`/`[p%]`
+  statistics cookies on parent items and headings recompute automatically
 - **incremental search**: `Ctrl+F` opens a *Find* prompt that jumps to the nearest match as
   you type, `Ctrl+F`/`Ctrl+R` step to the next/previous match, smart case, wraparound, and
   match highlighting
@@ -125,7 +129,7 @@ detail — including the north star of Org-mode–class structure editing for an
    buffers with switching — *done*
 3. **Markdown provider + structural editing** — 2nd provider; promote/demote, move
    subtrees, priorities, tags — *done*
-4. **Rich content** — timestamps *(done)*; tables, lists/checkboxes, links, markup, drawers
+4. **Rich content** — timestamps, lists/checkboxes *(done)*; tables, links, markup, drawers
 5. **Agenda** — multi-file views, sparse trees, custom keywords, dependencies
 6. **Organize** — capture, refile, archive
 7. **Time** — clocking, clock tables, repeaters, effort estimates

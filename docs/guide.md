@@ -31,12 +31,13 @@ New to editor jargon like *buffer* or *subtree*? Start with
 4. [Outlines: headings, folding, navigation](#4-outlines-headings-folding-navigation)
 5. [TODO workflow](#5-todo-workflow)
 6. [Restructuring the tree](#6-restructuring-the-tree)
-7. [Priorities and tags](#7-priorities-and-tags)
-8. [Dates and scheduling](#8-dates-and-scheduling)
-9. [Search](#9-search)
-10. [Org vs Markdown: what differs](#10-org-vs-markdown-what-differs)
-11. [Full keybinding reference](#11-full-keybinding-reference)
-12. [Limits and what's next](#12-limits-and-whats-next)
+7. [Lists and checkboxes](#7-lists-and-checkboxes)
+8. [Priorities and tags](#8-priorities-and-tags)
+9. [Dates and scheduling](#9-dates-and-scheduling)
+10. [Search](#10-search)
+11. [Org vs Markdown: what differs](#11-org-vs-markdown-what-differs)
+12. [Full keybinding reference](#12-full-keybinding-reference)
+13. [Limits and what's next](#13-limits-and-whats-next)
 
 ---
 
@@ -76,6 +77,11 @@ they show up throughout this guide and on torg's status line.
   act on this whole block.
 - **Fold** — a collapsed subtree: its body and children are hidden and the heading shows a `…`.
   Folding is a *view* — it never changes the text.
+- **List item** — a bulleted or numbered line (below a heading, or anywhere in the body), which
+  can nest by indentation and optionally carry a checkbox.
+- **Checkbox** — `[ ]` (unchecked), `[X]`/`[x]` (checked), or `[-]` (partial) on a list item.
+- **Statistics cookie** — a `[n/m]` or `[p%]` marker that counts checked children, on a list
+  item or a heading.
 
 **Metadata (on a heading)**
 
@@ -92,7 +98,7 @@ they show up throughout this guide and on torg's status line.
 **Formats**
 
 - **Format** — whether a buffer is parsed as **Org** or **Markdown**. torg picks it from the
-  file extension and re-checks on *Save As*; the two share almost all commands (see §10).
+  file extension and re-checks on *Save As*; the two share almost all commands (see §11).
 
 ---
 
@@ -236,7 +242,7 @@ Each buffer is parsed as **Org** or **Markdown**, chosen by the file extension:
 
 The format is **re-detected on *Save As***: start an untitled buffer, write it as `plan.md`,
 and its outline immediately switches to Markdown rules. All the structure commands in the rest
-of this guide work in both formats; the handful of genuine differences are collected in §10.
+of this guide work in both formats; the handful of genuine differences are collected in §11.
 
 ---
 
@@ -335,7 +341,7 @@ none  →  TODO  →  DONE  →  none
 
 The `TODO`/`DONE` keywords are torg's convention carried into Markdown (plain Markdown has no
 task keywords), so the same muscle memory works in both formats. The keyword sits right after
-the markers and before the title, and combines with priorities and tags (§7).
+the markers and before the title, and combines with priorities and tags (§8).
 
 ---
 
@@ -409,7 +415,102 @@ buffer with no headings yet, `Alt+Enter` starts a level-1 heading at the end.
 
 ---
 
-## 7. Priorities and tags
+## 7. Lists and checkboxes
+
+Below the heading level, torg also edits plain lists: bulleted or numbered items, with an
+optional checkbox and an optional statistics cookie that counts them.
+
+### Syntax
+
+A list item is indentation, a bullet, one space, and then optionally a checkbox:
+
+```
+- [ ] unpacked bullet, no checkbox
+- [X] checked
+  - [ ] a nested child, indented two spaces further
+```
+
+**In Org**, the bullet is `-`, `+`, or an indented `*` (a `*` at column 0 is always a heading,
+never a bullet), or an ordered `1.` / `1)`. **In Markdown**, `-`, `+`, and `*` all work as
+bullets at any indent (headings there are `#`, so there's no ambiguity), and the same ordered
+forms. A checkbox is `[ ]`, `[X]`, or `[-]` (partial — torg displays it but never writes it
+itself); Markdown also reads the lowercase GFM convention `[x]` and writes checks back
+lowercase, `[x]`, to match. Either way, the checkbox only counts if its closing bracket is
+followed by a space or the end of the line: `- [ ] task` is a checkbox, `- [ ]x` is not — the
+brackets there are just text.
+
+An item's children are the lines below it indented further, up to the next line indented the
+same or less; that line ends the item's subtree.
+
+### Toggling a checkbox
+
+Put the cursor anywhere on an item's line and press **`Ctrl+Space`** (or **`Alt+X`**, which
+always works even in terminals that eat `Ctrl+Space`):
+
+```
+- [ ] buy milk      Ctrl+Space →   - [X] buy milk
+- [X] buy milk      Ctrl+Space →   - [ ] buy milk
+- [-] in progress   Ctrl+Space →   - [X] in progress
+```
+
+An item with no checkbox, or a line that isn't a list item at all, is a no-op — the status
+line says `No checkbox here`.
+
+### Inserting and re-indenting items
+
+The same chords used for headings become list-aware the moment the cursor sits on an item:
+
+- **`Alt+Enter`** — insert a new sibling item right after this item's subtree. If the current
+  item has a checkbox, the new one gets a fresh `[ ]`; if the bullet is ordered, the new item
+  gets the next number and any following same-level siblings renumber.
+- **`Alt+←`** / **`Alt+→`** — dedent / indent the item by one level (its children stay put).
+  Dedenting an item already at column 0 is a no-op — `Already at top level`.
+
+```org
+- [ ] a           Alt+Enter        - [ ] a
+- [ ] b                            - [ ]
+                                   - [ ] b
+```
+
+Off a list item, these same keys still do what §6 describes — insert a sibling heading,
+promote, or demote.
+
+### Statistics cookies
+
+A `[n/m]` or `[p%]` cookie counts checked items and is recomputed after every toggle or insert:
+
+```org
+* Groceries [1/3]
+- [X] milk
+- [ ] eggs
+- [ ] bread
+```
+
+- A cookie on a **list item** counts that item's **direct children only** — a grandchild
+  checkbox doesn't count toward it.
+- A cookie on a **heading** counts the **top-level** checkbox items in that heading's own
+  section, not anything under a child heading.
+- `[n/m]` is written as the exact count; `[p%]` truncates (`100*n/m`), so two of three reads
+  `[66%]`. With nothing to count, torg writes `[0/0]` and `[0%]` rather than deleting the
+  cookie.
+- torg only rewrites cookie tokens that are **already on the line** — the parent items, the
+  heading, and the item that just moved. It never inserts a cookie where there wasn't one:
+  type `[/]` or `[0/0]` yourself, and the next toggle or insert fills it in.
+
+Checked boxes and complete cookies are highlighted the same way as a `DONE` keyword; unchecked
+boxes are dimmed and incomplete cookies read like `TODO`.
+
+**In Markdown**, the same GFM-style syntax works under a `#` heading:
+
+```markdown
+# Groceries [1/2]
+- [x] milk
+- [ ] eggs
+```
+
+---
+
+## 8. Priorities and tags
 
 ### Priorities
 
@@ -433,7 +534,7 @@ keyword and before the title, in both formats:
 ```
 
 > `Shift+↑`/`↓` is context-sensitive: when the cursor sits on a **timestamp** it shifts the
-> date instead of the priority (see §8). Off a timestamp, it always means priority.
+> date instead of the priority (see §9). Off a timestamp, it always means priority.
 
 ### Tags
 
@@ -454,7 +555,7 @@ as *data*, so a future agenda view can filter and sort by them.
 
 ---
 
-## 8. Dates and scheduling
+## 9. Dates and scheduling
 
 torg understands Org timestamps as structured data, in both formats.
 
@@ -515,14 +616,14 @@ Put the cursor on any part of a timestamp and press **`Shift+↑`** / **`Shift+�
 Days, hours, and minutes **carry** across boundaries (Jan 31 → Feb 1); changing the **month** or
 **year** clamps the day to the month's length (so Jan 31 + 1 month is Feb 29 in a leap year,
 Feb 28 otherwise). Remember the overloading: `Shift+↑`/`↓` shifts the date only when the cursor
-is *on* a timestamp — everywhere else it cycles the priority (§7).
+is *on* a timestamp — everywhere else it cycles the priority (§8).
 
 Timestamps and the `SCHEDULED:`/`DEADLINE:` keywords are highlighted in the buffer so they're
 easy to spot.
 
 ---
 
-## 9. Search
+## 10. Search
 
 **`Ctrl+F`** opens the *Find* prompt on the status line. Matching is incremental: as you
 type, the cursor jumps straight to the nearest match, scrolling the view if it isn't
@@ -555,7 +656,7 @@ Org and Markdown buffers.
 
 ---
 
-## 10. Org vs Markdown: what differs
+## 11. Org vs Markdown: what differs
 
 The commands are the same; only a few underlying rules change with the format.
 
@@ -569,6 +670,7 @@ The commands are the same; only a few underlying rules change with the format.
 | TODO keywords, `[#A]` priorities, `:tags:` | yes | yes (torg's convention) |
 | Inline timestamps + date-shift | yes | yes |
 | Folding, heading nav, structural editing | yes | yes |
+| Lists, checkboxes, cookies | yes; checked box writes `[X]` | yes; checked box writes `[x]` (GFM) |
 
 Everything not in that table behaves identically. And because each buffer keeps its own format,
 you can have an `.org` and a `.md` file open side by side and every command does the right thing
@@ -576,7 +678,7 @@ for whichever one you're in.
 
 ---
 
-## 11. Full keybinding reference
+## 12. Full keybinding reference
 
 **Movement & editing**
 
@@ -603,8 +705,15 @@ for whichever one you're in.
 | `Alt+←` / `Alt+→` | promote / demote heading |
 | `Alt+Shift+←` / `Alt+Shift+→` | promote / demote whole subtree |
 | `Alt+↑` / `Alt+↓` | move subtree up / down among siblings |
-| `Alt+Enter` | insert a sibling heading |
+| `Alt+Enter` | insert a sibling heading (or a sibling list item, on an item line) |
 | `Alt+T` | insert a `TODO` sibling heading |
+
+**Lists and checkboxes**
+
+| Key | Action |
+|-----|--------|
+| `Ctrl+Space` / `Alt+X` | toggle the checkbox on the cursor's list item |
+| `Alt+←` / `Alt+→` | on a list item, dedent / indent it instead of promoting/demoting a heading |
 
 **Priorities, tags, dates**
 
@@ -636,15 +745,14 @@ for whichever one you're in.
 
 ---
 
-## 12. Limits and what's next
+## 13. Limits and what's next
 
 torg is built in small, runnable milestones. What you've read here is everything that works
 today; several Org-class features are deliberately still ahead:
 
 - **No agenda yet** — timestamps, priorities, and tags parse as data, but there's no view that
   collects scheduled/TODO items across files. That's the next major milestone.
-- **Structure basics** — no tables, plain lists/checkboxes, links, inline markup, or drawers
-  yet.
+- **Structure basics** — no tables, links, inline markup, or drawers yet.
 - **No line wrapping** — long lines are clipped at the right edge (no horizontal scroll).
 - **Cursor drift on wide/combining characters** — the cursor is placed by character count, so
   full-width CJK or grapheme clusters can misalign visually.
