@@ -174,8 +174,9 @@ fn place_cursor(frame: &mut Frame, app: &App, body: Rect, status: Rect, cursor: 
             let col = "Find: ".len() + input.chars().count();
             frame.set_cursor_position(Position::new(status.x + col as u16, status.y));
         }
-        // No cursor while picking from the buffer list or answering a confirmation.
-        Mode::BufferList { .. } | Mode::ConfirmClose | Mode::ConfirmQuit => {}
+        // No cursor while picking from the buffer list, browsing the help menu, or
+        // answering a confirmation.
+        Mode::BufferList { .. } | Mode::HelpMenu { .. } | Mode::ConfirmClose | Mode::ConfirmQuit => {}
     }
 }
 
@@ -268,6 +269,11 @@ fn status_text(app: &App) -> String {
         Mode::Search { input, .. } => return format!("Find: {input}{hint}"),
         Mode::BufferList { .. } => {
             return " Buffers — ↑/↓ or 1-9 select · Enter switch · Esc cancel ".to_string()
+        }
+        // Task 3 renders the menu body; the footer hint lands now so the mode is fully
+        // usable (if not yet pretty) as soon as it exists.
+        Mode::HelpMenu { .. } => {
+            return "←/→ category · ↑/↓ select · Enter run · Esc close".to_string()
         }
         Mode::ConfirmClose => {
             let (name, _) = app.buffer_labels().swap_remove(app.active_index());
