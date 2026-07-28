@@ -760,6 +760,35 @@ pub(crate) fn line_in_fence(doc: &Document, line: usize) -> bool {
     fence.is_some()
 }
 
+/// The batch counterpart to [`line_in_fence`]: fence membership for every line in
+/// `0..=max_line`, computed with a single forward pass instead of one restarting-from-0 scan
+/// per line. `flags[l]` equals `line_in_fence(doc, l)` exactly, for every `l` in range —
+/// callers that need the answer for many lines (list.rs's multi-line region/section walks)
+/// use this to avoid turning an O(lines) walk into O(lines²) on a large Markdown document.
+pub(crate) fn fence_flags(doc: &Document, max_line: usize) -> Vec<bool> {
+    let last = max_line.min(doc.line_count().saturating_sub(1));
+    let mut flags = Vec::with_capacity(last + 1);
+    let mut fence: Option<(u8, usize)> = None;
+    for l in 0..=last {
+        flags.push(fence.is_some());
+        let raw = doc.line_text(l);
+        let text = raw.strip_suffix('\n').unwrap_or(&raw);
+        match fence {
+            Some((ch, len)) => {
+                if is_fence_closer(text, ch, len) {
+                    fence = None;
+                }
+            }
+            None => {
+                if let Some(opened) = fence_opener(text) {
+                    fence = Some(opened);
+                }
+            }
+        }
+    }
+    flags
+}
+
 /// Parse a single raw line (newline included) into an ATX heading, or `None` if it isn't one.
 /// `last_line` is left as `line` and filled in later by the caller.
 fn parse_md_heading(raw: &str, line: usize) -> Option<Heading> {

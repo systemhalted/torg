@@ -39,16 +39,51 @@ pub struct ListItem {
 
 /// Parse the list item at `line`, or `None` if that line is not one: blank, prose, a
 /// heading, a bullet with no following space, or (Markdown only) inside a fenced code block.
+///
+/// A single-query convenience: it computes `line`'s own fence membership on the spot
+/// (`line_in_fence` is O(line)). Code that queries many lines in a row — like
+/// `update_cookies`'s region/section walks below — should instead precompute fence
+/// membership once with [`fence_flags_for`] and go through [`item_at_cached`], or repeated
+/// calls to this function turn an O(lines) walk into O(lines²) on a large Markdown document.
 pub fn item_at(doc: &Document, line: usize, format: Format) -> Option<ListItem> {
     if line >= doc.line_count() {
         return None;
     }
-    if format == Format::Markdown && line_in_fence(doc, line) {
+    let in_fence = format == Format::Markdown && line_in_fence(doc, line);
+    item_at_with_fence(doc, line, format, in_fence)
+}
+
+/// [`item_at`]'s guts, taking the fence-membership answer instead of computing it — the
+/// shared core for both the single-query and cached-batch paths.
+fn item_at_with_fence(doc: &Document, line: usize, format: Format, in_fence: bool) -> Option<ListItem> {
+    if line >= doc.line_count() || in_fence {
         return None;
     }
     let raw = doc.line_text(line);
     let text = raw.strip_suffix('\n').unwrap_or(&raw);
     parse_item(text, line, format)
+}
+
+/// [`item_at`], but reading fence membership from a precomputed table (see
+/// [`fence_flags_for`]) instead of rescanning from line 0 — an O(1) lookup per line.
+fn item_at_cached(doc: &Document, line: usize, format: Format, fences: Option<&[bool]>) -> Option<ListItem> {
+    if line >= doc.line_count() {
+        return None;
+    }
+    let in_fence = fences.map(|f| f[line]).unwrap_or(false);
+    item_at_with_fence(doc, line, format, in_fence)
+}
+
+/// Markdown fence membership for every line of `doc`, computed once via a single forward
+/// pass ([`crate::structure::fence_flags`]) — `None` for Org, which has no fence concept and
+/// so needs no table at all. Built once per [`update_cookies`] call and threaded through its
+/// region/section walks so they each do an O(1) fence lookup per line instead of the O(line)
+/// rescan `item_at` does for a one-off query.
+fn fence_flags_for(doc: &Document, format: Format) -> Option<Vec<bool>> {
+    if format != Format::Markdown || doc.line_count() == 0 {
+        return None;
+    }
+    Some(crate::structure::fence_flags(doc, doc.line_count() - 1))
 }
 
 /// Parse a single raw line (no trailing newline) into a [`ListItem`].
@@ -192,15 +227,21 @@ fn checkbox_state_col(text: &str, content_col: usize) -> Option<usize> {
 /// Never inserts a cookie that wasn't already there — see the design doc's cookie rules.
 ///
 /// Cost profile: this runs once per user edit (toggle/insert/indent), not on every keystroke.
-/// It does one pass over the contiguous item region containing `line` — [`region_items`]
-/// parses each of those lines with `item_at` exactly once, however many ancestors `line` has
-/// — then one direct-children scan per ancestor over that same in-memory list (no further
-/// `item_at` calls there), plus one pass over the enclosing heading's own section to count
-/// top-level checkbox items (again one `item_at` call per line in that section). So the cost
-/// is linear in the affected list region plus one heading section, not quadratic in document
-/// size, and no line is ever re-parsed once for each ancestor.
+/// On Markdown it first builds a fence-membership table for the whole document with one
+/// forward pass ([`fence_flags_for`]) — without it, each of the many `item_at`-style line
+/// checks below would rescan from line 0 on its own, turning this into an O(lines²) walk on
+/// a large document (that regression was caught by a 4000-line-checklist timing probe; the
+/// fix is this shared table). With the table in hand, it does one pass over the contiguous
+/// item region containing `line` — [`region_items`] parses each of those lines exactly once,
+/// however many ancestors `line` has — then one direct-children scan per ancestor over that
+/// same in-memory list (no further per-line line-parses there), plus one pass over the
+/// enclosing heading's own section to count top-level checkbox items (again one parse per
+/// line in that section). So the total cost is one O(document) fence pass (Markdown only)
+/// plus work linear in the affected list region and one heading section — not quadratic in
+/// document size, and no line is ever re-parsed once for each ancestor.
 pub fn update_cookies(doc: &mut Document, line: usize, format: Format) {
-    let items = region_items(doc, line, format);
+    let fences = fence_flags_for(doc, format);
+    let items = region_items(doc, line, format, fences.as_deref());
     for parent_line in parent_chain(&items, line) {
         let (checked, total) = direct_children(&items, parent_line);
         rewrite_cookies_on_line(doc, parent_line, checked, total);
@@ -209,23 +250,24 @@ pub fn update_cookies(doc: &mut Document, line: usize, format: Format) {
     let outline = format.parse(doc);
     if let Some(h) = enclosing_heading(&outline, line) {
         let section_end = heading_own_section_end(&outline, h);
-        let (checked, total) = top_level_checkbox_counts(doc, h.line + 1, section_end, format);
+        let (checked, total) =
+            top_level_checkbox_counts(doc, h.line + 1, section_end, format, fences.as_deref());
         rewrite_cookies_on_line(doc, h.line, checked, total);
     }
 }
 
 /// The maximal contiguous run of item lines containing `line` (empty if `line` itself isn't
-/// one): expands outward from `line` while `item_at` returns `Some`, so each line in the
+/// one): expands outward from `line` while items keep being found, so each line in the
 /// region is parsed exactly once regardless of how many ancestors are later queried against
-/// the result.
-fn region_items(doc: &Document, line: usize, format: Format) -> Vec<ListItem> {
-    let Some(cur) = item_at(doc, line, format) else {
+/// the result. `fences` is the precomputed table from [`fence_flags_for`] (or `None` on Org).
+fn region_items(doc: &Document, line: usize, format: Format, fences: Option<&[bool]>) -> Vec<ListItem> {
+    let Some(cur) = item_at_cached(doc, line, format, fences) else {
         return Vec::new();
     };
     let mut items = vec![cur];
     let mut l = line;
     while l > 0 {
-        match item_at(doc, l - 1, format) {
+        match item_at_cached(doc, l - 1, format, fences) {
             Some(it) => {
                 items.push(it);
                 l -= 1;
@@ -235,7 +277,7 @@ fn region_items(doc: &Document, line: usize, format: Format) -> Vec<ListItem> {
     }
     items.reverse();
     let mut l = line;
-    while let Some(it) = item_at(doc, l + 1, format) {
+    while let Some(it) = item_at_cached(doc, l + 1, format, fences) {
         items.push(it);
         l += 1;
     }
@@ -301,12 +343,14 @@ fn heading_own_section_end(outline: &Outline, h: &Heading) -> usize {
 /// `(checked, total)` among the TOP-LEVEL checkbox items in `start..=end`: items with no
 /// item above them, within the same contiguous item run, at a strictly smaller indent —
 /// nested items (and whole nested lists under them) are excluded. Each line in the range is
-/// parsed by `item_at` exactly once.
+/// parsed exactly once. `fences` is the precomputed table from [`fence_flags_for`] (or `None`
+/// on Org).
 fn top_level_checkbox_counts(
     doc: &Document,
     start: usize,
     end: usize,
     format: Format,
+    fences: Option<&[bool]>,
 ) -> (usize, usize) {
     let last = doc.line_count().saturating_sub(1);
     if start > last {
@@ -317,7 +361,7 @@ fn top_level_checkbox_counts(
     let mut checked = 0usize;
     let mut total = 0usize;
     for l in start..=end {
-        match item_at(doc, l, format) {
+        match item_at_cached(doc, l, format, fences) {
             Some(item) => {
                 let has_parent = run.iter().any(|prev| prev.indent < item.indent);
                 if !has_parent && item.checkbox.is_some() {
@@ -679,5 +723,32 @@ mod tests {
         let mut d = doc("- Shopping [0/2] (due Friday)\n  - [ ] a\n  - [ ] b\n");
         toggle_checkbox(&mut d, 1, Format::Org); // toggle "a"
         assert_eq!(d.text(), "- Shopping [1/2] (due Friday)\n  - [X] a\n  - [ ] b\n");
+    }
+
+    #[test]
+    fn heading_cookie_excludes_a_child_headings_own_section() {
+        // P's own section ends right before C (the next heading at ANY level), even though
+        // C is nested inside P's subtree — so P's cookie counts only p1, not c1/c2.
+        let mut d = doc("* P [/]\n- [ ] p1\n** C\n- [ ] c1\n- [ ] c2\n");
+        toggle_checkbox(&mut d, 1, Format::Org); // toggle p1
+        assert_eq!(d.text(), "* P [1/1]\n- [X] p1\n** C\n- [ ] c1\n- [ ] c2\n");
+
+        // A change inside the child heading's own section doesn't touch P's cookie.
+        toggle_checkbox(&mut d, 3, Format::Org); // toggle c1
+        assert_eq!(d.text(), "* P [1/1]\n- [X] p1\n** C\n- [X] c1\n- [ ] c2\n");
+    }
+
+    #[test]
+    fn heading_percent_cookie_with_no_countable_boxes_recomputes_to_zero_percent() {
+        let mut d = doc("* H [100%]\nplain text, no items\n");
+        update_cookies(&mut d, 0, Format::Org);
+        assert_eq!(d.text(), "* H [0%]\nplain text, no items\n");
+    }
+
+    #[test]
+    fn heading_fraction_cookie_with_no_countable_boxes_recomputes_to_zero_over_zero() {
+        let mut d = doc("* H [3/5]\nplain text, no items\n");
+        update_cookies(&mut d, 0, Format::Org);
+        assert_eq!(d.text(), "* H [0/0]\nplain text, no items\n");
     }
 }
