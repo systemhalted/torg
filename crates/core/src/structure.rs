@@ -736,6 +736,30 @@ fn is_fence_closer(text: &str, ch: u8, len: usize) -> bool {
     matches!(fence_run(text), Some((c, run, rest)) if c == ch && run >= len && rest.trim().is_empty())
 }
 
+/// Whether `line` sits inside a fenced code block (```/~~~) opened on an earlier line —
+/// the same stateful scan [`MarkdownProvider::parse`] uses to hide `#` headings, exposed so
+/// `list.rs` can apply the identical guard to list items.
+pub(crate) fn line_in_fence(doc: &Document, line: usize) -> bool {
+    let mut fence: Option<(u8, usize)> = None;
+    for l in 0..line {
+        let raw = doc.line_text(l);
+        let text = raw.strip_suffix('\n').unwrap_or(&raw);
+        match fence {
+            Some((ch, len)) => {
+                if is_fence_closer(text, ch, len) {
+                    fence = None;
+                }
+            }
+            None => {
+                if let Some(opened) = fence_opener(text) {
+                    fence = Some(opened);
+                }
+            }
+        }
+    }
+    fence.is_some()
+}
+
 /// Parse a single raw line (newline included) into an ATX heading, or `None` if it isn't one.
 /// `last_line` is left as `line` and filled in later by the caller.
 fn parse_md_heading(raw: &str, line: usize) -> Option<Heading> {
