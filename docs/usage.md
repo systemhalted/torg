@@ -50,11 +50,12 @@ still opens the full [guide](guide.md) in a buffer you read like any other and c
 | `Ctrl+F` | Find (incremental); `Ctrl+F`/`Ctrl+R` next/previous while open. |
 | `Ctrl+N` / `Ctrl+P` | Jump to the next / previous heading. |
 | `Ctrl+T` | Cycle the current heading's keyword: none → `TODO` → `DONE` → none. |
-| `Alt+←` / `Alt+→` | Promote / demote the current heading (children keep their level). |
+| `Alt+←` / `Alt+→` | Promote / demote the current heading (children keep their level). List-aware: on a list-item line, dedent / indent the item instead. |
 | `Alt+Shift+←` / `Alt+Shift+→` | Promote / demote the whole subtree. |
 | `Alt+↑` / `Alt+↓` | Move the subtree up / down among its same-level siblings. |
-| `Alt+Enter` | Insert a sibling heading after the current subtree. |
+| `Alt+Enter` | Insert a sibling heading after the current subtree. List-aware: on a list-item line, inserts a sibling item instead. |
 | `Alt+T` (or `Alt+Shift+Enter`*) | Insert a `TODO` sibling heading. |
+| `Ctrl+Space` (or `Alt+X`) | Toggle the checkbox on the cursor's list item. |
 | `Shift+↑` / `Shift+↓` | Raise / lower the heading's priority: none ↔ `[#C]` ↔ `[#B]` ↔ `[#A]`. |
 | `Ctrl+G` | Edit the heading's tags (space-separated in the prompt; empty removes them). |
 | `Alt+S` / `Alt+D` | Set the heading's `SCHEDULED` / `DEADLINE` date (Org buffers only). |
@@ -108,6 +109,63 @@ subtree).
 - **Tags** — `Ctrl+G` prompts for space-separated tags and writes them at the end of the
   headline as `:work:urgent:`. Tags may use letters, digits, and `_ @ # %`; an empty prompt
   removes the run. Tags and priorities are parsed as data — the agenda (M5) will use them.
+
+## Lists and checkboxes
+
+A list item line is indentation, a bullet, one space, then optionally a checkbox and content.
+
+| Piece | Org | Markdown |
+|---|---|---|
+| Unordered bullet | `-`, `+` at any indent; `*` only when indented (column 0 `*` is a heading) | `-`, `+`, `*` at any indent |
+| Ordered bullet | `1.`, `1)` | `1.`, `1)` |
+| Checkbox | `[ ]`, `[X]`, `[-]` right after the bullet's space; written back as `[X]` | same, plus `[x]` on read; written back as `[x]` |
+| Statistics cookie | `[n/m]` or `[p%]`, anywhere on a parent-item line or a headline | same |
+
+A checkbox only counts as one when its closing bracket is followed by a space or the end of
+the line: `- [ ] task` is a checkbox, `- [ ]x` is not (the brackets are just text). Nesting is
+by indentation — an item's children are the lines below it indented more than it is, up to the
+next line indented the same or less.
+
+- **`Ctrl+Space`** (or **`Alt+X`**, for terminals that eat `Ctrl+Space`) — toggle the checkbox
+  on the cursor's item: `[ ]` and `[-]` become `[X]`, `[X]` becomes `[ ]`. On an item with no
+  checkbox, or a non-item line, it's a no-op and says so on the status line.
+- **`Alt+Enter`** — list-aware: on a list-item line, inserts a new sibling item right after
+  this item's subtree, with a fresh `[ ]` if the current item has a checkbox; an ordered
+  bullet gets the next number and later same-level siblings renumber. Off an item, it inserts
+  a sibling heading as usual.
+- **`Alt+←`** / **`Alt+→`** — list-aware: on a list-item line, dedent / indent the item by one
+  level (its children stay where they are); dedenting at column 0 says `Already at top level`.
+  Off an item, these promote / demote a heading as usual.
+
+Statistics cookies are recomputed after every toggle and insert:
+
+- A cookie on a parent item counts that item's **direct** children only — a checkbox nested
+  two levels down doesn't count toward its grandparent's cookie.
+- A cookie on a heading counts the **top-level** checkbox items in that heading's own section
+  text, not items under any child heading.
+- `[n/m]` is the count as written; `[p%]` truncates (`100*n/m`), so `[2/3]` reads as `[66%]`.
+  When there's nothing to count, torg writes `[0/0]` and `[0%]` rather than removing the
+  cookie.
+- Recompute only rewrites cookie-shaped tokens that are already on the line — on the parent
+  items, the heading, and the moved item itself. torg never inserts a cookie where none
+  exists; type `[/]` or `[0/0]` yourself and the next toggle or insert fills it in.
+
+Both formats work the same way:
+
+```org
+* Groceries [1/3]
+- [X] milk
+- [ ] eggs
+- [ ] bread
+```
+
+```markdown
+- [x] milk
+- [ ] eggs
+```
+
+Checked boxes and complete cookies are highlighted like a `DONE` keyword; unchecked boxes are
+dimmed and incomplete cookies are highlighted like `TODO`.
 
 ## Dates and scheduling
 
@@ -230,6 +288,6 @@ Several things are deliberately still ahead (see [`roadmap.md`](roadmap.md)):
 - **No line wrapping** — long lines are clipped at the right edge (no horizontal scroll).
 - **Cursor drift on wide/combining characters** — the cursor is placed by character count, so
   full-width CJK or grapheme clusters can misalign visually.
-- **No tables, lists, links, agenda, source-block execution, or export yet** — see
+- **No tables, links, agenda, source-block execution, or export yet** — see
   [`roadmap.md`](roadmap.md) for where these land (M4–M10). Timestamps parse as data and can
   be edited, but there is no agenda that collects them yet (M5).

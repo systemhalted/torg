@@ -25,7 +25,7 @@
 - Create: `crates/core/src/list.rs`
 - Modify: `crates/core/src/lib.rs` (`pub mod list;` alphabetical; re-export `pub use list::{item_at, toggle_checkbox, insert_item, indent_item, ListItem, Bullet, CheckState};` — add names as they appear per task)
 
-- [ ] **Step 1: Failing tests.** Model + parser tests (module shape mirrors `search.rs`):
+- [x] **Step 1: Failing tests.** Model + parser tests (module shape mirrors `search.rs`):
 
 ```rust
 //! Plain lists: bullets, checkboxes, statistics cookies, and their edits.
@@ -65,12 +65,12 @@ pub fn item_at(doc: &Document, line: usize, format: Format) -> Option<ListItem>;
 
 Tests (Org unless stated): `- task` at indent 0/2/5 parses with right indent/bullet/content_col; `+ task` parses; `* task` at col 0 is None in Org (heading) but Some in Markdown; `  * task` (indented) parses in Org; `3. x` and `3) x` parse Ordered with the number and paren flag; `- [ ] t`/`- [X] t`/`- [x] t`/`- [-] t` give the right `CheckState` (x lowercase accepted); `-[ ] t` parses as an item with NO checkbox (content starts at the bracket? no — `-[ ]` has no space after the bullet, so it is NOT an item at all: bullet requires one space. Assert None); `- x [ ] y` has checkbox None; blank line → None; plain text → None; heading line → None; `1.x` (no space) → None; content_col points past `[ ] ` when a checkbox exists (assert an exact number, e.g. `- [ ] t` → 6). In Markdown, a `- item` line inside a fenced code block → None.
 
-- [ ] **Step 2: Verify compile failure** (`cargo test -p torg-core list`).
+- [x] **Step 2: Verify compile failure** (`cargo test -p torg-core list`).
 
-- [ ] **Step 3: Implement `item_at`.** Parse: count leading spaces (tabs: treat a line with tab-indent conservatively — a tab counts as one char of indent for nesting comparisons; document this in a comment); bullet char or `digits + ('.'|')')`; require one space after; Org rejects `Star` at indent 0; optionally parse `[c]` + trailing space where c ∈ {' ', 'X', 'x', '-'}. Markdown fence check: reuse the provider's mechanism — read `structure.rs`'s MarkdownProvider fence handling first; if its fence-scan helper is private, EITHER make it `pub(crate)` (preferred, minimal) or replicate the scan; state which in the report.
+- [x] **Step 3: Implement `item_at`.** Parse: count leading spaces (tabs: treat a line with tab-indent conservatively — a tab counts as one char of indent for nesting comparisons; document this in a comment); bullet char or `digits + ('.'|')')`; require one space after; Org rejects `Star` at indent 0; optionally parse `[c]` + trailing space where c ∈ {' ', 'X', 'x', '-'}. Markdown fence check: reuse the provider's mechanism — read `structure.rs`'s MarkdownProvider fence handling first; if its fence-scan helper is private, EITHER make it `pub(crate)` (preferred, minimal) or replicate the scan; state which in the report.
 
-- [ ] **Step 4: Tests pass; workspace + clippy clean.**
-- [ ] **Step 5: Commit** — "Parse plain list items in both formats" (list.rs + lib.rs).
+- [x] **Step 4: Tests pass; workspace + clippy clean.**
+- [x] **Step 5: Commit** — "Parse plain list items in both formats" (list.rs + lib.rs).
 
 ---
 
@@ -78,13 +78,13 @@ Tests (Org unless stated): `- task` at indent 0/2/5 parses with right indent/bul
 
 **Files:** `crates/core/src/list.rs`
 
-- [ ] **Step 1: Failing tests.**
+- [x] **Step 1: Failing tests.**
 - Toggle: `[ ]`→`[X]` (Org) / `[x]` (Markdown); `[X]`/`[x]`→`[ ]`; `[-]`→`[X]`; no checkbox → `NoOp("No checkbox here")`; non-item line → same NoOp; cursor stays (`EditOutcome::Changed { cursor_line }` = same line).
 - Cookies, via toggle: parent `- top [0/2]` with two direct `[ ]` children — toggling one child rewrites parent to `[1/2]`; grandchildren do NOT count toward the grandparent (build a 3-level fixture and assert only the direct parent's cookie changes); `[50%]` form updates by truncation (`[2/3]`-equivalent → `[66%]`); unfilled `[/]` and `[%]` get filled; heading `* Heading [0/2]` counts only TOP-LEVEL checkbox items in its section (nested `[ ]` children excluded — assert); a heading cookie in a DIFFERENT section is untouched; multiple cookies on one line all update; cookie-free parents/headings gain nothing (no insertion); surrounding text preserved exactly.
 
-- [ ] **Step 2: verify failures.**
+- [x] **Step 2: verify failures.**
 
-- [ ] **Step 3: Implement.**
+- [x] **Step 3: Implement.**
 
 ```rust
 pub fn toggle_checkbox(doc: &mut Document, line: usize, format: Format) -> EditOutcome;
@@ -101,8 +101,8 @@ Algorithms (implement as free/private helpers, each unit-testable):
 - Cookie rewrite: scan the target line's text for `[` `digits?` `/` `digits?` `]` and `[` `digits?` `%` `]` token spans (also matching the unfilled forms); replace each with the recomputed text; preserve everything else. Char-range `doc.remove`/`doc.insert` edits, rightmost-first so earlier spans stay valid.
 - `toggle_checkbox` flips the char at the checkbox position (checkbox col = derivable from `content_col`; store or recompute), then calls `update_cookies(line)`.
 
-- [ ] **Step 4: green + clean.**
-- [ ] **Step 5: Commit** — "Toggle checkboxes and keep statistics cookies current".
+- [x] **Step 4: green + clean.**
+- [x] **Step 5: Commit** — "Toggle checkboxes and keep statistics cookies current".
 
 ---
 
@@ -110,14 +110,14 @@ Algorithms (implement as free/private helpers, each unit-testable):
 
 **Files:** `crates/core/src/list.rs`
 
-- [ ] **Step 1: Failing tests.**
+- [x] **Step 1: Failing tests.**
 - Insert: after `- a` (no children) inserts `- ` on the next line, `Changed { cursor_line }` = new line (content position noted for the TUI); after an item WITH children inserts after the whole subtree at the SAME level; current item has checkbox → new item gets `[ ] `; ordered `1.` → new item numbered next and FOLLOWING same-level siblings renumbered (+1 each, `2.`→`3.` etc.; `1)` keeps paren style); at end-of-buffer without trailing newline still works; non-item line → NoOp; cookies recompute (a `[1/2]` parent with a new unchecked child → `[1/3]`).
 - Indent/dedent: indent adds 2 spaces to the item line only (children untouched); dedent removes up to 2; dedent at indent 0 → `NoOp("Already at top level")`; Org `* item` at indent 1 dedenting would hit col 0 → NoOp too (would become a heading — refuse, message `Would become a heading`); bullets never rewritten; cookies recompute after indent/dedent (an item indented under a new parent changes both old and new parents' counts — assert one such case; recompute the heading cookie too).
 
-- [ ] **Step 2: verify failures.**
-- [ ] **Step 3: Implement** `insert_item(doc, line, format) -> EditOutcome` and `indent_item(doc, line, format, dedent: bool) -> EditOutcome`, both ending with `update_cookies`. Subtree span of an item = its lines through the last line of its deepest descendant (same walk as Task 2). Renumbering: after inserting an ordered item, walk following same-level siblings in the region and rewrite their numbers (+1). Keep functions small; share the region/children walks from Task 2.
-- [ ] **Step 4: green + clean.**
-- [ ] **Step 5: Commit** — "Insert and re-indent list items".
+- [x] **Step 2: verify failures.**
+- [x] **Step 3: Implement** `insert_item(doc, line, format) -> EditOutcome` and `indent_item(doc, line, format, dedent: bool) -> EditOutcome`, both ending with `update_cookies`. Subtree span of an item = its lines through the last line of its deepest descendant (same walk as Task 2). Renumbering: after inserting an ordered item, walk following same-level siblings in the region and rewrite their numbers (+1). Keep functions small; share the region/children walks from Task 2.
+- [x] **Step 4: green + clean.**
+- [x] **Step 5: Commit** — "Insert and re-indent list items".
 
 ---
 
@@ -125,21 +125,21 @@ Algorithms (implement as free/private helpers, each unit-testable):
 
 **Files:** `crates/tui/src/action.rs`, `crates/tui/src/commands.rs`, `crates/tui/src/app.rs`
 
-- [ ] **Step 1: Failing tests.**
+- [x] **Step 1: Failing tests.**
 - action.rs: `Ctrl+Space` (`KeyCode::Char(' ')` + CONTROL — also verify how crossterm delivers NUL: add a second mapping for `KeyCode::Null` if the existing test harness can express it; check crossterm's parse of `\0` and note what you find) and `Alt+X` both → `Some(Action::ToggleCheckbox)`.
 - app.rs: toggle on a checkbox item flips it and updates the parent cookie in one keypress; toggle on a plain line sets status "No checkbox here"; `Alt+Enter` on an item line inserts an item (cursor on the new item's content col) while on a heading line it still inserts a sibling heading; `Alt+←/→` on an item line dedents/indents while on a heading line it still promotes/demotes; dedent at top level shows "Already at top level".
 - commands.rs drift guard: adding the variant breaks `requires_entry` compilation — the fix (marking it `true` + a `COMMANDS` row in Structure: keys "Ctrl+Space", name "Toggle checkbox", description "Toggle the item's checkbox (Alt+X also works)") is part of THIS task; also extend the tests' `menu_actions()` list.
 
-- [ ] **Step 2: verify failures** (compile error from the drift guard arrives immediately — that is the guard working; fold the required arms in to reach runnable-failing-test state, exactly like the search feature did for `Action::Find`).
+- [x] **Step 2: verify failures** (compile error from the drift guard arrives immediately — that is the guard working; fold the required arms in to reach runnable-failing-test state, exactly like the search feature did for `Action::Find`).
 
-- [ ] **Step 3: Implement.**
+- [x] **Step 3: Implement.**
 - `Action::ToggleCheckbox` variant + both key mappings (+ `KeyCode::Null` arm if warranted).
 - app.rs: `ToggleCheckbox` arm calls `list::toggle_checkbox(&mut b.doc, line, b.format)` via the same edit-then-reparse helper the other structural edits use (find `structural_edit`/the closure-taking helper at ~app.rs:516 and reuse it or mirror it — cursor sync + status + `reparse()`).
 - Context routing: in the `InsertSibling`, `PromoteHeading`, `DemoteHeading` arms, first check `list::item_at(&b.doc, cursor_line, b.format)`; on Some route to `insert_item` / `indent_item(dedent=true/false)`; else the existing heading behavior. Follow `shift_date_or_priority`'s shape. Cursor placement: after insert, `view.move_to(&doc, new_line, content_col)` (the core returns `Changed { cursor_line }`; content col = `item_at` on the new line).
 - COMMANDS row + `menu_actions()` entry.
 
-- [ ] **Step 4: green + clean (workspace).**
-- [ ] **Step 5: Commit** — "Wire checkbox toggling and list-aware structural keys into the TUI".
+- [x] **Step 4: green + clean (workspace).**
+- [x] **Step 5: Commit** — "Wire checkbox toggling and list-aware structural keys into the TUI".
 
 ---
 
@@ -147,10 +147,10 @@ Algorithms (implement as free/private helpers, each unit-testable):
 
 **Files:** `crates/tui/src/ui.rs`, `docs/usage.md`, `docs/guide.md`, `README.md`, `man/torg.1`, spec + this plan
 
-- [ ] **Step 1 (rendering, TDD on the pure function):** extend `highlight_line` (or its span pipeline) to style checkboxes and cookies: `[X]`/`[x]` in the DONE style the file already has for done TODO keywords (find the existing style constants/logic), `[ ]`/`[-]` dimmed, complete cookies (`n == m` or `100%`) DONE-style, incomplete TODO-style. Literal rendering, no concealment. Tests mirror the existing `highlight_line` timestamp tests.
-- [ ] **Step 2 (docs):** usage.md key table (+ "Lists and checkboxes" section: syntax, keys, cookie behavior, both formats); guide.md section; README works-today bullet; man/torg.1 entries (`Ctrl+Space`/`Alt+X` + a Lists paragraph; groff -ww clean). Spec status → "approved design, implemented" + record any deviations found during implementation. Tick this plan's boxes. Plain sentences.
-- [ ] **Step 3 (tmux, per `.claude/skills/verify/SKILL.md`):** fixture .org: `* Groceries [0/3]` with three `- [ ]` items, one nested `- [ ]` child under the first. Verify: Ctrl+Space (and Alt+X) on item 1 → `[X]` and heading shows `[1/3]` (nested child NOT counted); Alt+Enter on an item → new `- [ ]` line, cursor ready; Alt+→ indents it; Alt+← twice → "Already at top level" status; Alt+Enter on the heading still creates a sibling heading. Repeat the toggle + cookie check in a `.md` fixture with `- [ ]` GFM items and a `[0/2]` cookie. Honest pane-by-pane report; BLOCKED on failure.
-- [ ] **Step 4: full gates, commit** — "Render and document lists, checkboxes, and cookies". No push/PR — final review first.
+- [x] **Step 1 (rendering, TDD on the pure function):** extend `highlight_line` (or its span pipeline) to style checkboxes and cookies: `[X]`/`[x]` in the DONE style the file already has for done TODO keywords (find the existing style constants/logic), `[ ]`/`[-]` dimmed, complete cookies (`n == m` or `100%`) DONE-style, incomplete TODO-style. Literal rendering, no concealment. Tests mirror the existing `highlight_line` timestamp tests.
+- [x] **Step 2 (docs):** usage.md key table (+ "Lists and checkboxes" section: syntax, keys, cookie behavior, both formats); guide.md section; README works-today bullet; man/torg.1 entries (`Ctrl+Space`/`Alt+X` + a Lists paragraph; groff -ww clean). Spec status → "approved design, implemented" + record any deviations found during implementation. Tick this plan's boxes. Plain sentences.
+- [x] **Step 3 (tmux, per `.claude/skills/verify/SKILL.md`):** fixture .org: `* Groceries [0/3]` with three `- [ ]` items, one nested `- [ ]` child under the first. Verify: Ctrl+Space (and Alt+X) on item 1 → `[X]` and heading shows `[1/3]` (nested child NOT counted); Alt+Enter on an item → new `- [ ]` line, cursor ready; Alt+→ indents it; Alt+← twice → "Already at top level" status; Alt+Enter on the heading still creates a sibling heading. Repeat the toggle + cookie check in a `.md` fixture with `- [ ]` GFM items and a `[0/2]` cookie. Honest pane-by-pane report; BLOCKED on failure.
+- [x] **Step 4: full gates, commit** — "Render and document lists, checkboxes, and cookies". No push/PR — final review first.
 
 ---
 

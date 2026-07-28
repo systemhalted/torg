@@ -1,6 +1,6 @@
 # Plain lists, checkboxes, and statistics cookies (M4)
 
-Date: 2026-07-26 · Status: approved design, pre-implementation
+Date: 2026-07-26 · Status: approved design, implemented
 Reference semantics: the Org manual — Plain Lists and Checkboxes chapters
 (https://orgmode.org/org.html).
 
@@ -36,6 +36,10 @@ A list item line is: indentation, bullet, one space, then optionally a checkbox 
 | Checkbox | `[ ]`, `[X]`, `[-]` right after the bullet; written back as `[X]` | same; parses `[x]` too, written back as `[x]` (GFM convention) |
 | Statistics cookie | `[n/m]` or `[p%]` anywhere on a parent-item line or a headline | same (torg extension, like TODO keywords in Markdown) |
 
+A checkbox is only recognized in the space-delimited form: the closing bracket must be
+followed by a space or be the end of the line. `- [ ]x` is not a checkbox — the brackets are
+ordinary content, because nothing follows the `]` but non-space text.
+
 Nesting: an item's children are the item lines below it with strictly greater indentation,
 up to the next line with indentation ≤ its own. Non-item lines end the list region.
 Indent unit is two spaces.
@@ -60,9 +64,13 @@ Cookie recompute, after every toggle and insert:
 - A cookie on a headline counts the **top-level** checkbox items of the lists in its own
   section text (not in child headings' sections).
 - `[n/m]` is written as counted; `[p%]` uses integer truncation (`100*n/m`), so `[2/3]` ↔
-  `[66%]`. `[0/0]` and `[100%]`-with-no-boxes are written literally, never removed.
+  `[66%]`. When there are zero countable boxes, recompute writes `[0/0]` and `[0%]` — the
+  cookie is never removed for being empty.
 - Cookies are rewritten in place wherever they already appear on the line; torg never
-  inserts a cookie on its own (type `[/]` or `[0/0]` yourself, the recompute fills it).
+  inserts a cookie on its own (type `[/]` or `[0/0]` yourself, the recompute fills it). This
+  rewrite touches only the recomputed lines themselves — the parent items, the enclosing
+  heading, and (after an insert or indent) the line that moved — matching Org's own
+  regex-based, rewrite-what's-there behavior rather than tracking cookies structurally.
 - Manual text edits do **not** trigger recompute (documented simplification, matches Org's
   update-on-command behavior).
 
@@ -152,3 +160,17 @@ both formats; README works-today bullet; roadmap M4 line updated when shipped.
 
 Second M4 chunk (after timestamps). Next after this: hyperlinks, then inline markup,
 tables, drawers/PROPERTIES — see `docs/roadmap.md` M4.
+
+## Implementation notes (Task 5)
+
+- `ui.rs::highlight_line` had no existing DONE/TODO color styling to reuse — only
+  `SCHEDULED:`/`DEADLINE:` (yellow) and timestamps (cyan, underlined) were styled before this
+  task. Checked checkboxes and complete cookies now use a new green style, and incomplete
+  cookies a new red style, introduced alongside the checkbox/cookie scan rather than reused
+  from a pre-existing DONE/TODO style.
+- The render-path scan is intentionally lexical, not structural: it doesn't call
+  `torg_core::list::item_at` (too costly per visible line per frame) and carries no `Format`,
+  so it can't apply Org's column-0-`*`-is-a-heading rule or Markdown's fence guard. A heading
+  whose title happens to look like `- [ ]` or contain a `[2/3]`-shaped token could pick up
+  checkbox/cookie coloring it doesn't structurally deserve; this is cosmetic-only and never
+  affects an edit.

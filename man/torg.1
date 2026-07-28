@@ -94,7 +94,33 @@ Move the subtree up / down among its siblings.
 .BR Alt+Enter ", " Alt+T
 Insert a sibling heading, or a
 .B TODO
-sibling.
+sibling. On a list\(hyitem line,
+.B Alt+Enter
+inserts a sibling item instead.
+.TP
+.BR Ctrl+Space ", " Alt+X
+Toggle the checkbox on the cursor's list item
+.RB ( Alt+X
+always works, for terminals that swallow
+.BR Ctrl+Space ).
+On a list\(hyitem line,
+.BR Alt+Left / Alt+Right
+dedent / indent the item instead of promoting/demoting a heading.
+.SS Lists
+A list item is indentation, a bullet
+.RB ( \- ", " + ", an indented " * ", or an ordered " 1. " / " 1) )
+, one space, and optionally a checkbox
+.RB ( "[ ]" ", " [X] ", or " [\-] ,
+Markdown also reads
+.BR [x] ).
+A checkbox counts only when its closing bracket is followed by a space or the end of the
+line.
+.PP
+Statistics cookies
+.RB ( [n/m] " or " [p%] )
+on a parent item or a heading are recomputed after every toggle or insert: an item's cookie
+counts its direct children, and a heading's cookie counts the top\(hylevel items in its own
+section.
 .SS Priorities, tags, dates
 .TP
 .BR Shift+Up ", " Shift+Down
